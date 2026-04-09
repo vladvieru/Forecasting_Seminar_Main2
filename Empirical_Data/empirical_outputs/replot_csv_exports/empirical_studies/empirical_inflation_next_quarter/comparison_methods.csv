@@ -1,0 +1,13 @@
+method
+full_gcsr_eigenvector
+full_gcsr_pagerank
+full_gcsr_softmax
+graph_only_eigenvector
+graph_only_pagerank
+graph_only_softmax
+rs_selection
+rs_selection_v2
+bates_granger_mv
+var_error
+recent_best
+equal

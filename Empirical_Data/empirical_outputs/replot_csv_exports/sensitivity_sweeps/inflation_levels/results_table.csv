@@ -1,0 +1,16 @@
+Source,Source_Type,Method,Family,Centrality,Cov_Method,Mean_Loss,Median_Loss,Std_Loss,Total_Loss,Rel_MSFE,MCS_pvalue,In_MCS,Elimination_Step,Rank
+inflation_levels,empirical,full_gcsr_softmax_shrinkage,full_gcsr,softmax,shrinkage,8.046915659119868,0.3227252046334147,17.234464287100614,249.4543854327159,0.9414153659863997,1.0,True,0,1
+inflation_levels,empirical,full_gcsr_softmax_rolling,full_gcsr,softmax,rolling,8.066712940806909,0.3216913547944468,17.192152518058872,250.06810116501418,0.9437314664619675,1.0,True,0,2
+inflation_levels,empirical,full_gcsr_pagerank_shrinkage,full_gcsr,pagerank,shrinkage,8.067158693571814,0.29664076907890097,17.370386379778072,250.08191950072623,0.9437836154492428,1.0,True,0,3
+inflation_levels,empirical,full_gcsr_eigenvector_rolling,full_gcsr,eigenvector,rolling,8.095311139294404,0.28780806713774015,17.260498689001857,250.95464531812652,0.9470771935251242,1.0,True,0,4
+inflation_levels,empirical,full_gcsr_pagerank_ewma,full_gcsr,pagerank,ewma,8.103187268978534,0.35999999999916,17.333808077203532,251.19880533833455,0.947998628497633,1.0,True,0,5
+inflation_levels,empirical,full_gcsr_softmax_ewma,full_gcsr,softmax,ewma,8.104526734999846,0.3678122586120145,17.310964931117606,251.24032878499523,0.9481553337432324,1.0,True,0,6
+inflation_levels,empirical,full_gcsr_eigenvector_shrinkage,full_gcsr,eigenvector,shrinkage,8.108924069886584,0.28883476548146236,17.44164081224267,251.37664616648408,0.9486697816145818,1.0,True,0,7
+inflation_levels,empirical,full_gcsr_eigenvector_ewma,full_gcsr,eigenvector,ewma,8.110052242122881,0.3599999999991598,17.343128411169175,251.41161950580934,0.948801767424266,1.0,True,0,8
+inflation_levels,empirical,full_gcsr_pagerank_rolling,full_gcsr,pagerank,rolling,8.11646200543729,0.2891939092442126,17.30425076554483,251.610322168556,0.949551650973708,1.0,True,0,9
+inflation_levels,empirical,graph_only_softmax,graph_only,softmax,not_used,8.146407397195942,0.3114259917408014,18.010799791186635,252.5386293130742,0.9530549872998602,1.0,True,0,10
+inflation_levels,empirical,graph_only_eigenvector,graph_only,eigenvector,not_used,8.222495882988454,0.5434368766074638,17.84012894510181,254.89737237264208,0.9619566426339169,1.0,True,0,11
+inflation_levels,empirical,full_gcsr_eigenvector_diagonal,full_gcsr,eigenvector,diagonal,8.251313606881457,0.508044983732831,17.822224336480332,255.79072181332515,0.965328052157127,1.0,True,0,12
+inflation_levels,empirical,full_gcsr_softmax_diagonal,full_gcsr,softmax,diagonal,8.310945030563301,0.4692724862678774,17.716779740512287,257.63929594746236,0.972304382086236,1.0,True,0,13
+inflation_levels,empirical,graph_only_pagerank,graph_only,pagerank,not_used,8.392322440907654,0.3082795155454338,18.130255837581128,260.16199566813725,0.9818247931092506,1.0,True,0,14
+inflation_levels,empirical,full_gcsr_pagerank_diagonal,full_gcsr,pagerank,diagonal,8.46821683487347,0.48617907634406116,18.163956179440838,262.51472188107755,0.9907037414788251,1.0,True,0,15

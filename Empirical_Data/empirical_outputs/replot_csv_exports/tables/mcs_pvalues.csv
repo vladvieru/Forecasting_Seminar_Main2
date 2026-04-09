@@ -1,0 +1,13 @@
+,1A,2A,2B,2C,4A
+full_gcsr_eigenvector,1.0,1.0,0.06,1.0,1.0
+full_gcsr_pagerank,1.0,1.0,0.06,1.0,1.0
+full_gcsr_softmax,1.0,1.0,0.06,1.0,1.0
+graph_only_eigenvector,0.0,0.0,0.01,1.0,0.0
+graph_only_pagerank,1.0,1.0,0.01,1.0,1.0
+graph_only_softmax,1.0,1.0,0.06,1.0,1.0
+rs_selection,0.0,0.0,0.01,1.0,0.0
+rs_selection_v2,0.0,0.0,0.01,1.0,0.0
+bates_granger_mv,1.0,1.0,0.0,1.0,1.0
+var_error,1.0,1.0,1.0,1.0,1.0
+recent_best,0.0,0.0,0.01,1.0,0.0
+equal,1.0,1.0,0.0,1.0,1.0

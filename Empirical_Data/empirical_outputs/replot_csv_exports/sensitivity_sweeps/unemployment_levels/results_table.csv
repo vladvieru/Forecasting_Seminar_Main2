@@ -1,0 +1,16 @@
+Source,Source_Type,Method,Family,Centrality,Cov_Method,Mean_Loss,Median_Loss,Std_Loss,Total_Loss,Rel_MSFE,MCS_pvalue,In_MCS,Elimination_Step,Rank
+unemployment_levels,empirical,graph_only_softmax,graph_only,softmax,not_used,0.7947331131341613,0.6895332557812381,0.6941079237505396,47.68398678804968,0.9150309513957153,1.0,True,0,1
+unemployment_levels,empirical,full_gcsr_softmax_diagonal,full_gcsr,softmax,diagonal,0.7975914481459491,0.8334117491591024,0.6731505981965279,47.85548688875694,0.9183219492942795,1.0,True,0,2
+unemployment_levels,empirical,full_gcsr_pagerank_diagonal,full_gcsr,pagerank,diagonal,0.8092984132520793,0.848566496095406,0.6846936880389192,48.557904795124756,0.9318009842583234,1.0,True,0,3
+unemployment_levels,empirical,full_gcsr_softmax_shrinkage,full_gcsr,softmax,shrinkage,0.8160197369699186,0.886058996668923,0.6781723718989336,48.961184218195115,0.9395397070251635,1.0,True,0,4
+unemployment_levels,empirical,graph_only_pagerank,graph_only,pagerank,not_used,0.8253531535636968,0.8217206497318498,0.7103987798170739,49.521189213821806,0.9502859121655245,1.0,True,0,5
+unemployment_levels,empirical,full_gcsr_eigenvector_diagonal,full_gcsr,eigenvector,diagonal,0.8283075010493524,0.870137897935064,0.6959849289532525,49.69845006296114,0.9536874558358165,1.0,True,0,6
+unemployment_levels,empirical,full_gcsr_softmax_rolling,full_gcsr,softmax,rolling,0.8289091889372415,0.8243957719717501,0.6820974735914996,49.73455133623449,0.9543802205280126,1.0,True,0,7
+unemployment_levels,empirical,full_gcsr_pagerank_shrinkage,full_gcsr,pagerank,shrinkage,0.8312004825944056,0.9118253361117077,0.6858243631887018,49.872028955664334,0.9570183446735808,1.0,True,0,8
+unemployment_levels,empirical,full_gcsr_softmax_ewma,full_gcsr,softmax,ewma,0.8314652505735489,0.9448475234360101,0.6485799117077252,49.887915034412934,0.9573231902775337,1.0,True,0,9
+unemployment_levels,empirical,graph_only_eigenvector,graph_only,eigenvector,not_used,0.8319590677975015,0.8106670333194288,0.7166619063692821,49.91754406785009,0.9578917560473263,1.0,True,0,10
+unemployment_levels,empirical,full_gcsr_eigenvector_ewma,full_gcsr,eigenvector,ewma,0.8335306821783163,0.9499307301992208,0.6504863757448898,50.01184093069897,0.959701263891328,1.0,True,0,11
+unemployment_levels,empirical,full_gcsr_eigenvector_shrinkage,full_gcsr,eigenvector,shrinkage,0.8339666172433908,0.8931831531510321,0.6917226274051224,50.03799703460345,0.9602031859463546,1.0,True,0,12
+unemployment_levels,empirical,full_gcsr_pagerank_ewma,full_gcsr,pagerank,ewma,0.8373669223903607,0.9448475234360101,0.6526325860320983,50.24201534342164,0.9641181913767907,1.0,True,0,13
+unemployment_levels,empirical,full_gcsr_eigenvector_rolling,full_gcsr,eigenvector,rolling,0.850514842199989,0.8542376777870461,0.7031645780781524,51.03089053199934,0.9792562967022796,1.0,True,0,14
+unemployment_levels,empirical,full_gcsr_pagerank_rolling,full_gcsr,pagerank,rolling,0.8505415724490573,0.8846882857420006,0.6843573937338264,51.03249434694344,0.9792870730784389,1.0,True,0,15

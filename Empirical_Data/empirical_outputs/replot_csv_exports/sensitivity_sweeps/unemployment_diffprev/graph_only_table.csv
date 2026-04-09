@@ -1,0 +1,4 @@
+Source,Source_Type,Method,Family,Centrality,Cov_Method,Mean_Loss,Median_Loss,Std_Loss,Total_Loss,Rel_MSFE,MCS_pvalue,In_MCS,Elimination_Step,Rank
+unemployment_diffprev,empirical,graph_only_softmax,graph_only,softmax,not_used,0.8025640895184764,0.7478984451819879,0.6964707458529897,47.351281281590104,0.9134360220077756,1.0,True,0,1
+unemployment_diffprev,empirical,graph_only_pagerank,graph_only,pagerank,not_used,0.8317113299081754,0.8146310027151449,0.7180848662663029,49.07096846458235,0.9466098702546428,1.0,True,0,4
+unemployment_diffprev,empirical,graph_only_eigenvector,graph_only,eigenvector,not_used,0.8337611834093127,0.8114109795612238,0.7219435490987658,49.19190982114945,0.9489429051514584,1.0,True,0,6

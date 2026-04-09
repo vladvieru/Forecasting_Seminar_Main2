@@ -1,0 +1,13 @@
+iteration,method
+1,full_gcsr_eigenvector
+1,full_gcsr_pagerank
+1,full_gcsr_softmax
+1,graph_only_eigenvector
+1,graph_only_pagerank
+1,graph_only_softmax
+1,rs_selection
+1,rs_selection_v2
+1,bates_granger_mv
+1,var_error
+1,recent_best
+1,equal

@@ -1,0 +1,13 @@
+Source,Source_Type,Method,Family,Centrality,Cov_Method,Mean_Loss,Median_Loss,Std_Loss,Total_Loss,Rel_MSFE,MCS_pvalue,In_MCS,Elimination_Step,Rank
+simulation_4A,simulation,full_gcsr_eigenvector_diagonal,full_gcsr,eigenvector,diagonal,0.7033147880287492,0.34080879631478567,0.9004618397795051,105.49721820431239,1.0735709637818642,1.0,True,0,1
+simulation_4A,simulation,full_gcsr_pagerank_diagonal,full_gcsr,pagerank,diagonal,0.710271905084118,0.3242442031692768,0.9159056549976657,106.5407857626177,1.0841906165879847,1.0,True,0,2
+simulation_4A,simulation,full_gcsr_softmax_diagonal,full_gcsr,softmax,diagonal,0.7120538376737049,0.3242442031692768,0.9274964881863427,106.80807565105573,1.0869106377224171,1.0,True,0,3
+simulation_4A,simulation,full_gcsr_softmax_shrinkage,full_gcsr,softmax,shrinkage,0.7669987245359629,0.4008802906644897,1.0061710313687433,115.04980868039442,1.170780956031704,1.0,True,0,6
+simulation_4A,simulation,full_gcsr_pagerank_shrinkage,full_gcsr,pagerank,shrinkage,0.770472465315814,0.4008671287416289,1.0091927157952147,115.57086979737211,1.176083428410261,1.0,True,0,7
+simulation_4A,simulation,full_gcsr_eigenvector_shrinkage,full_gcsr,eigenvector,shrinkage,0.7746388413267842,0.39756464846653206,1.0215984041022508,116.19582619901763,1.18244317000209,1.0,True,0,8
+simulation_4A,simulation,full_gcsr_softmax_rolling,full_gcsr,softmax,rolling,0.7833688125240328,0.42817001295145074,1.0156761335710283,117.50532187860492,1.1957689861964098,1.0,True,0,9
+simulation_4A,simulation,full_gcsr_eigenvector_rolling,full_gcsr,eigenvector,rolling,0.7872022494899528,0.45199338758987806,1.0159249647443602,118.0803374234929,1.201620514826477,1.0,True,0,10
+simulation_4A,simulation,full_gcsr_pagerank_rolling,full_gcsr,pagerank,rolling,0.7992527376638039,0.4307448456310818,1.0341504571100002,119.88791064957059,1.220014915773318,1.0,True,0,11
+simulation_4A,simulation,full_gcsr_softmax_ewma,full_gcsr,softmax,ewma,0.8143971527466023,0.41429672231389714,1.096975987251743,122.15957291199034,1.2431320243185855,1.0,True,0,12
+simulation_4A,simulation,full_gcsr_eigenvector_ewma,full_gcsr,eigenvector,ewma,0.8145688468183468,0.44105499668260295,1.0377209602268553,122.18532702275203,1.2433941057836932,1.0,True,0,13
+simulation_4A,simulation,full_gcsr_pagerank_ewma,full_gcsr,pagerank,ewma,0.8185312079808191,0.4003783055301096,1.0668429382166837,122.77968119712287,1.2494424300397065,1.0,True,0,14

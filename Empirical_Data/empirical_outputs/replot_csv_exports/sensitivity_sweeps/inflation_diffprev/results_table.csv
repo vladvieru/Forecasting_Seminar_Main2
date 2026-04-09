@@ -1,0 +1,16 @@
+Source,Source_Type,Method,Family,Centrality,Cov_Method,Mean_Loss,Median_Loss,Std_Loss,Total_Loss,Rel_MSFE,MCS_pvalue,In_MCS,Elimination_Step,Rank
+inflation_diffprev,empirical,full_gcsr_softmax_shrinkage,full_gcsr,softmax,shrinkage,8.278723433650317,0.26754383538069704,17.46224026900965,248.3617030095095,0.9413422513292176,1.0,True,0,1
+inflation_diffprev,empirical,full_gcsr_softmax_rolling,full_gcsr,softmax,rolling,8.311842212774438,0.2819201783617091,17.381428200019744,249.35526638323316,0.9451080621274447,1.0,True,0,2
+inflation_diffprev,empirical,full_gcsr_softmax_ewma,full_gcsr,softmax,ewma,8.347754095698146,0.33589971348145087,17.532912498008955,250.4326228709444,0.949191466168153,1.0,True,0,3
+inflation_diffprev,empirical,full_gcsr_eigenvector_shrinkage,full_gcsr,eigenvector,shrinkage,8.35409945745521,0.2727416143956014,17.673051053919515,250.6229837236563,0.9499129731939359,1.0,True,0,4
+inflation_diffprev,empirical,full_gcsr_eigenvector_ewma,full_gcsr,eigenvector,ewma,8.375658987978554,0.32142276153537436,17.591941100861774,251.2697696393566,0.9523644256627977,1.0,True,0,5
+inflation_diffprev,empirical,full_gcsr_pagerank_shrinkage,full_gcsr,pagerank,shrinkage,8.37947470851959,0.2816099816809493,17.738492386992885,251.3842412555877,0.9527982967775087,1.0,True,0,6
+inflation_diffprev,empirical,graph_only_softmax,graph_only,softmax,not_used,8.384046288926875,0.2957842179032117,18.260511977568395,251.52138866780626,0.9533181138516283,1.0,True,0,7
+inflation_diffprev,empirical,full_gcsr_pagerank_ewma,full_gcsr,pagerank,ewma,8.40104163519893,0.3971093833721098,17.658870047126523,252.0312490559679,0.9552505902352247,1.0,True,0,8
+inflation_diffprev,empirical,full_gcsr_pagerank_rolling,full_gcsr,pagerank,rolling,8.40399410932558,0.2828300851002872,17.59452992529463,252.11982327976742,0.9555863048733145,1.0,True,0,9
+inflation_diffprev,empirical,full_gcsr_eigenvector_rolling,full_gcsr,eigenvector,rolling,8.45646830861104,0.2828300851002872,17.71627626211761,253.6940492583312,0.9615529471084318,1.0,True,0,10
+inflation_diffprev,empirical,graph_only_eigenvector,graph_only,eigenvector,not_used,8.46686124684275,0.4506824988380407,18.076920667574175,254.0058374052825,0.9627346887080119,1.0,True,0,11
+inflation_diffprev,empirical,full_gcsr_eigenvector_diagonal,full_gcsr,eigenvector,diagonal,8.519047729694966,0.31260634591023284,18.099419793933098,255.57143189084897,0.968668615798435,1.0,True,0,12
+inflation_diffprev,empirical,full_gcsr_softmax_diagonal,full_gcsr,softmax,diagonal,8.574365626312956,0.31099805364122124,17.96901084569203,257.23096878938867,0.9749586040748298,1.0,True,0,13
+inflation_diffprev,empirical,graph_only_pagerank,graph_only,pagerank,not_used,8.63395393992822,0.2853287190494099,18.375352380420516,259.0186181978466,0.9817341652759088,1.0,True,0,14
+inflation_diffprev,empirical,full_gcsr_pagerank_diagonal,full_gcsr,pagerank,diagonal,8.731979986770371,0.41358625828678597,18.40861613099422,261.95939960311114,0.9928803353784419,1.0,True,0,15

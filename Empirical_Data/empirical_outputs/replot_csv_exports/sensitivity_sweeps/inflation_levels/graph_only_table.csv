@@ -1,0 +1,4 @@
+Source,Source_Type,Method,Family,Centrality,Cov_Method,Mean_Loss,Median_Loss,Std_Loss,Total_Loss,Rel_MSFE,MCS_pvalue,In_MCS,Elimination_Step,Rank
+inflation_levels,empirical,graph_only_softmax,graph_only,softmax,not_used,8.146407397195942,0.3114259917408014,18.010799791186635,252.5386293130742,0.9530549872998602,1.0,True,0,10
+inflation_levels,empirical,graph_only_eigenvector,graph_only,eigenvector,not_used,8.222495882988454,0.5434368766074638,17.84012894510181,254.89737237264208,0.9619566426339169,1.0,True,0,11
+inflation_levels,empirical,graph_only_pagerank,graph_only,pagerank,not_used,8.392322440907654,0.3082795155454338,18.130255837581128,260.16199566813725,0.9818247931092506,1.0,True,0,14

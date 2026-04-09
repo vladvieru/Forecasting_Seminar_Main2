@@ -1,0 +1,4 @@
+Source,Source_Type,Method,Family,Centrality,Cov_Method,Mean_Loss,Median_Loss,Std_Loss,Total_Loss,Rel_MSFE,MCS_pvalue,In_MCS,Elimination_Step,Rank
+simulation_4A,simulation,graph_only_pagerank,graph_only,pagerank,not_used,0.7471937028442708,0.3295011374684084,0.9763649339897844,112.07905542664062,1.1405496903350676,1.0,True,0,4
+simulation_4A,simulation,graph_only_softmax,graph_only,softmax,not_used,0.7581396835488654,0.3353846291090885,0.9766790772341165,113.72095253232982,1.1572581219713565,1.0,True,0,5
+simulation_4A,simulation,graph_only_eigenvector,graph_only,eigenvector,not_used,1.0637893619267285,0.5207829664417738,1.5940009439144918,159.56840428900927,1.623815381083511,0.0,False,1,15

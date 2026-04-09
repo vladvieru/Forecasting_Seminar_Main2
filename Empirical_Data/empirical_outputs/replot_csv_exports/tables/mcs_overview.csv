@@ -1,0 +1,6 @@
+Scenario,MCS_Size,Included_Models
+1A,8,"full_gcsr_eigenvector, full_gcsr_pagerank, full_gcsr_softmax, graph_only_pagerank, graph_only_softmax, bates_granger_mv, var_error, equal"
+2A,8,"full_gcsr_eigenvector, full_gcsr_pagerank, full_gcsr_softmax, graph_only_pagerank, graph_only_softmax, bates_granger_mv, var_error, equal"
+2B,1,var_error
+2C,12,"full_gcsr_eigenvector, full_gcsr_pagerank, full_gcsr_softmax, graph_only_eigenvector, graph_only_pagerank, graph_only_softmax, rs_selection, rs_selection_v2, bates_granger_mv, var_error, recent_best, equal"
+4A,8,"full_gcsr_eigenvector, full_gcsr_pagerank, full_gcsr_softmax, graph_only_pagerank, graph_only_softmax, bates_granger_mv, var_error, equal"

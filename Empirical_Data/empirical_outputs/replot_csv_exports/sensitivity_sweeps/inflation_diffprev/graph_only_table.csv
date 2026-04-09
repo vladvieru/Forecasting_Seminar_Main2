@@ -1,0 +1,4 @@
+Source,Source_Type,Method,Family,Centrality,Cov_Method,Mean_Loss,Median_Loss,Std_Loss,Total_Loss,Rel_MSFE,MCS_pvalue,In_MCS,Elimination_Step,Rank
+inflation_diffprev,empirical,graph_only_softmax,graph_only,softmax,not_used,8.384046288926875,0.2957842179032117,18.260511977568395,251.52138866780626,0.9533181138516283,1.0,True,0,7
+inflation_diffprev,empirical,graph_only_eigenvector,graph_only,eigenvector,not_used,8.46686124684275,0.4506824988380407,18.076920667574175,254.0058374052825,0.9627346887080119,1.0,True,0,11
+inflation_diffprev,empirical,graph_only_pagerank,graph_only,pagerank,not_used,8.63395393992822,0.2853287190494099,18.375352380420516,259.0186181978466,0.9817341652759088,1.0,True,0,14

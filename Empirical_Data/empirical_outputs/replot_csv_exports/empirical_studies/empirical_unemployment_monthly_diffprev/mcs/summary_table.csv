@@ -1,0 +1,13 @@
+Method,Mean_Loss,MCS_pvalue,In_MCS,Elimination_Step
+rs_selection,0.6539381265809051,1.0,True,0
+graph_only_eigenvector,0.6546504428987656,1.0,True,0
+graph_only_softmax,0.7579519347461131,1.0,True,0
+graph_only_pagerank,0.7653910241970068,1.0,True,0
+full_gcsr_pagerank,0.7682225709995119,1.0,True,0
+full_gcsr_softmax,0.7840018244672206,1.0,True,0
+full_gcsr_eigenvector,0.7984040463826635,1.0,True,0
+rs_selection_v2,0.7984072965238808,1.0,True,0
+var_error,0.8702630490308093,1.0,True,0
+recent_best,0.8784922372417238,1.0,True,0
+equal,0.8786210201721654,0.035,False,2
+bates_granger_mv,0.9262865575093229,0.015,False,1

@@ -1,0 +1,13 @@
+method,event_index,event_time,recovery_delay
+full_gcsr_eigenvector,0,150,5.0
+full_gcsr_pagerank,0,150,6.0
+full_gcsr_softmax,0,150,
+graph_only_eigenvector,0,150,4.0
+graph_only_pagerank,0,150,5.0
+graph_only_softmax,0,150,5.0
+rs_selection,0,150,
+rs_selection_v2,0,150,
+bates_granger_mv,0,150,
+var_error,0,150,19.0
+recent_best,0,150,
+equal,0,150,

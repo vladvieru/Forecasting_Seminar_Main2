@@ -1,0 +1,13 @@
+method,mean_loss,mcs_pvalue,in_mcs,elimination_step
+full_gcsr_eigenvector,0.7836881440468612,1.0,True,0
+full_gcsr_pagerank,0.774411681684376,1.0,True,0
+full_gcsr_softmax,0.7697199384195073,1.0,True,0
+graph_only_eigenvector,0.6408914067136997,1.0,True,0
+graph_only_pagerank,0.754595517941397,1.0,True,0
+graph_only_softmax,0.7633866754118838,1.0,True,0
+rs_selection,0.572098197576706,1.0,True,0
+rs_selection_v2,0.804257522147208,1.0,True,0
+bates_granger_mv,0.9161545477389785,0.01,False,1
+var_error,0.8735288269875123,0.075,False,3
+recent_best,0.8665173666210284,1.0,True,0
+equal,0.8685313998635114,0.02,False,2

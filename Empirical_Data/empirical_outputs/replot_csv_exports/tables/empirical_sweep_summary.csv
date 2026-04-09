@@ -1,0 +1,16 @@
+Family,Centrality,Cov_Method,Method,Mean_Loss,Mean_Rel_MSFE,Median_Rel_MSFE,Mean_Rank,Median_Rank,Mean_MCS_pvalue,MCS_Inclusion_Rate,Sources
+full_gcsr,softmax,shrinkage,full_gcsr_softmax_shrinkage,4.493628963429094,0.9425527907551772,0.9413788086578087,2.75,2.5,1.0,1.0,4
+graph_only,softmax,not_used,graph_only_softmax,4.531937722193863,0.9337100186387448,0.9340429693477877,4.75,4.0,1.0,1.0,4
+full_gcsr,softmax,rolling,full_gcsr_softmax_rolling,4.511738692063978,0.949670843757676,0.9497441413277287,5.0,4.5,1.0,1.0,4
+full_gcsr,pagerank,shrinkage,full_gcsr_pagerank_shrinkage,4.529546152164052,0.9525107571964772,0.9546205343315424,6.75,7.0,1.0,1.0,4
+full_gcsr,softmax,ewma,full_gcsr_softmax_ewma,4.532899142191866,0.9549121491177626,0.9532573282228434,7.25,7.5,1.0,1.0,4
+full_gcsr,softmax,diagonal,full_gcsr_softmax_diagonal,4.621608188283043,0.9450302608395722,0.9453131656902578,7.5,7.5,1.0,1.0,4
+full_gcsr,eigenvector,shrinkage,full_gcsr_eigenvector_shrinkage,4.534109723444016,0.9535505331565177,0.9526645825325673,7.75,7.5,1.0,1.0,4
+full_gcsr,pagerank,diagonal,full_gcsr_pagerank_diagonal,4.706862156721905,0.9615840934244793,0.9612523628685743,9.0,9.0,1.0,1.0,4
+full_gcsr,eigenvector,diagonal,full_gcsr_eigenvector_diagonal,4.608291827708013,0.9593665433038878,0.9595077539964718,9.25,9.5,1.0,1.0,4
+graph_only,pagerank,not_used,graph_only_pagerank,4.670835216076936,0.9651136852013317,0.9660100387207167,9.25,9.5,1.0,1.0,4
+graph_only,eigenvector,not_used,graph_only_eigenvector,4.588769345259505,0.9578814981351784,0.9599241993406216,9.5,10.5,1.0,1.0,4
+full_gcsr,eigenvector,ewma,full_gcsr_eigenvector_ewma,4.543666166940526,0.9586161046004498,0.9560328447770629,9.5,9.5,1.0,1.0,4
+full_gcsr,pagerank,ewma,full_gcsr_pagerank_ewma,4.548397277019992,0.9592652813867624,0.9596843908060078,9.5,10.0,1.0,1.0,4
+full_gcsr,eigenvector,rolling,full_gcsr_eigenvector_rolling,4.563889960095602,0.9647570454568557,0.9663473458000095,10.25,11.5,1.0,1.0,4
+full_gcsr,pagerank,rolling,full_gcsr_pagerank_rolling,4.558323143424783,0.9664608716469865,0.9674366889758768,12.0,12.0,1.0,1.0,4

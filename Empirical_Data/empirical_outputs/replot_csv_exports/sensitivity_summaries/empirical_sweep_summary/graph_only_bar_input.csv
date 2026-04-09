@@ -1,0 +1,4 @@
+Family,Centrality,Cov_Method,Method,Mean_Loss,Rel_MSFE,Median_Rel_MSFE,Mean_Rank,Median_Rank,Mean_MCS_pvalue,MCS_Inclusion_Rate,Sources
+graph_only,softmax,not_used,graph_only_softmax,4.531937722193863,0.9337100186387448,0.9340429693477877,4.75,4.0,1.0,1.0,4
+graph_only,eigenvector,not_used,graph_only_eigenvector,4.588769345259505,0.9578814981351784,0.9599241993406216,9.5,10.5,1.0,1.0,4
+graph_only,pagerank,not_used,graph_only_pagerank,4.670835216076936,0.9651136852013317,0.9660100387207167,9.25,9.5,1.0,1.0,4
