@@ -772,8 +772,8 @@ def predict_pairwise_ld_v2(
 
 PAIRWISE_LD_METHOD_VARIANTS = {
     "rs_selection": ("legacy", "v2"),
-    "graph_only": ("legacy",),
-    "full_gcsr": ("legacy",),
+    "graph_only": ("legacy", "v2"),
+    "full_gcsr": ("legacy", "v2"),
 }
 
 PAIRWISE_LD_VARIANT_SUFFIX = {
@@ -861,6 +861,26 @@ def _centrality_method_name(
     if len(tuple(active_types)) <= 1:
         return base_name
     return f"{base_name}_{centrality_type}"
+
+
+def _ld_centrality_method_name(
+    base_name: str,
+    variant: str,
+    centrality_type: str,
+    active_types: Sequence[str],
+) -> str:
+    """
+    Public method naming for graph-based LD methods with variant labels.
+
+    Historical legacy names are preserved for backward compatibility, while
+    alternative LD engines such as `v2` are made explicit via names like
+    `graph_only_v2_pagerank` and `full_gcsr_v2_softmax`.
+    """
+    if variant == "legacy":
+        return _centrality_method_name(base_name, centrality_type, active_types)
+    if len(tuple(active_types)) <= 1:
+        return f"{base_name}_{variant}"
+    return f"{base_name}_{variant}_{centrality_type}"
 
 
 def _loss_diff_method_enabled(base_name: str, variant: str) -> bool:
@@ -2263,8 +2283,9 @@ def run_backtest(
             if base_name in {"graph_only", "full_gcsr"}:
                 for centrality_type in active_centrality_types:
                     method_names.append(
-                        _centrality_method_name(
+                        _ld_centrality_method_name(
                             base_name,
+                            variant,
                             centrality_type,
                             active_centrality_types,
                         )
@@ -2483,31 +2504,32 @@ def run_backtest(
                 w_rs = rs_selection_weights(mu_mat)
                 res.weights[_loss_diff_method_name("rs_selection", variant)][oos_idx] = w_rs
 
-            if variant == "legacy":
-                for centrality_type in active_centrality_types:
-                    scores = state["centrality_by_type"][centrality_type]
-                    alpha_sel = state["alpha_by_type"][centrality_type]
-                    gamma_sel = state["gamma_by_type"][centrality_type]
+            for centrality_type in active_centrality_types:
+                scores = state["centrality_by_type"][centrality_type]
+                alpha_sel = state["alpha_by_type"][centrality_type]
+                gamma_sel = state["gamma_by_type"][centrality_type]
 
-                    if _loss_diff_method_enabled("graph_only", variant):
-                        graph_name = _centrality_method_name(
-                            "graph_only",
-                            centrality_type,
-                            active_centrality_types,
-                        )
-                        w_go = graph_only_weights(scores)
-                        res.weights[graph_name][oos_idx] = w_go
+                if _loss_diff_method_enabled("graph_only", variant):
+                    graph_name = _ld_centrality_method_name(
+                        "graph_only",
+                        variant,
+                        centrality_type,
+                        active_centrality_types,
+                    )
+                    w_go = graph_only_weights(scores)
+                    res.weights[graph_name][oos_idx] = w_go
 
-                    if _loss_diff_method_enabled("full_gcsr", variant):
-                        full_name = _centrality_method_name(
-                            "full_gcsr",
-                            centrality_type,
-                            active_centrality_types,
-                        )
-                        w_full = full_combination_weights(
-                            Sigma, scores, alpha_sel, gamma_sel, bt_cfg.ridge_cov
-                        )
-                        res.weights[full_name][oos_idx] = w_full
+                if _loss_diff_method_enabled("full_gcsr", variant):
+                    full_name = _ld_centrality_method_name(
+                        "full_gcsr",
+                        variant,
+                        centrality_type,
+                        active_centrality_types,
+                    )
+                    w_full = full_combination_weights(
+                        Sigma, scores, alpha_sel, gamma_sel, bt_cfg.ridge_cov
+                    )
+                    res.weights[full_name][oos_idx] = w_full
 
         # --- Combined forecasts and losses ---
         for name in method_names:
@@ -4423,42 +4445,6 @@ def document_adaptability_measure() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def document_simulations() -> pd.DataFrame:
-    """High-level guide to the simulation designs implemented in this file."""
-    rows = [
-        {
-            "Scenario": "1A_stable_unbiased",
-            "Notebook_Analogue": "stable_unbiased",
-            "Mechanism": "No bias; homoskedastic idiosyncratic noise; common shock retained.",
-            "Instability": "None",
-        },
-        {
-            "Scenario": "2A_abrupt_break",
-            "Notebook_Analogue": "abrupt_break",
-            "Mechanism": "Forecaster-specific bias redraw at the break date.",
-            "Instability": "Abrupt bias shift",
-        },
-        {
-            "Scenario": "2B_smooth_drift",
-            "Notebook_Analogue": "smooth_drift",
-            "Mechanism": "Bias follows a local-trend process with persistent slope innovations.",
-            "Instability": "Smooth bias drift",
-        },
-        {
-            "Scenario": "2C_precision_shift",
-            "Notebook_Analogue": "precision_shift_smooth",
-            "Mechanism": "Log precision drifts smoothly, producing time-varying idiosyncratic variance.",
-            "Instability": "Smooth precision drift",
-        },
-        {
-            "Scenario": "4A_common_rw_idio_ar1_bias",
-            "Notebook_Analogue": "common_bias_random_walk",
-            "Mechanism": "A shared random-walk bias is added to forecaster-specific AR(1) bias deviations with much smaller innovations.",
-            "Instability": "Persistent common bias drift with smaller idiosyncratic bias dynamics",
-        },
-    ]
-    return pd.DataFrame(rows)
-
 # ===================================================================
 # 12.  EMPIRICAL INFLATION EVALUATION
 # ===================================================================
@@ -5301,7 +5287,7 @@ def print_timing_rules():
 # ===================================================================
 
 def run_all_scenarios(
-    n_reps: int = 10,
+    n_reps: int = 20,
     bt_cfg: BacktestConfig = None,
     verbose: bool = True,
     M: int = 8,
@@ -5318,8 +5304,8 @@ def run_all_scenarios(
             centrality_types=DEFAULT_COMPARISON_CENTRALITY_TYPES,
             cov_window=50,
             min_history=30,
-            alpha=None,
-            gamma=None,
+            alpha=0.1,        # speed: avoid re-tuning at every OOS step
+            gamma=0.1,
             tune_window=30,
         )
     else:

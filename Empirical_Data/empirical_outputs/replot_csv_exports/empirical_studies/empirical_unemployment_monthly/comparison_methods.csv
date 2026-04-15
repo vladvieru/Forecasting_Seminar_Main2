@@ -1,10 +1,16 @@
 method
 full_gcsr_eigenvector
+full_gcsr_v2_eigenvector
 full_gcsr_pagerank
+full_gcsr_v2_pagerank
 full_gcsr_softmax
+full_gcsr_v2_softmax
 graph_only_eigenvector
+graph_only_v2_eigenvector
 graph_only_pagerank
+graph_only_v2_pagerank
 graph_only_softmax
+graph_only_v2_softmax
 rs_selection
 rs_selection_v2
 bates_granger_mv
