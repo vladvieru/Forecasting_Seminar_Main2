@@ -139,7 +139,7 @@ oos_period,centrality_type,alpha,gamma
 287,eigenvector,5.0,0.5
 288,eigenvector,2.0,0.1
 289,eigenvector,2.0,0.1
-290,eigenvector,5.0,1.0
+290,eigenvector,5.0,0.001
 291,eigenvector,2.0,0.05
 292,eigenvector,2.0,0.1
 293,eigenvector,2.0,0.001
@@ -426,11 +426,11 @@ oos_period,centrality_type,alpha,gamma
 274,softmax,5.0,1.0
 275,softmax,5.0,0.5
 276,softmax,5.0,1.0
-277,softmax,5.0,0.01
+277,softmax,5.0,0.001
 278,softmax,5.0,0.5
 279,softmax,5.0,0.5
 280,softmax,5.0,0.5
-281,softmax,5.0,0.05
+281,softmax,5.0,0.001
 282,softmax,5.0,0.5
 283,softmax,5.0,0.5
 284,softmax,5.0,0.5
