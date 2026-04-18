@@ -1,0 +1,1 @@
+Out-of-sample forecasts for differenced inflation. The black line is the realized differenced value; colored lines are selected forecast-combination methods. Values are measured in percentage points.

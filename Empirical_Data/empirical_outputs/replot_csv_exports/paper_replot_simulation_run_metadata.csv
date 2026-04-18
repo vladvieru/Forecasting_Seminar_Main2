@@ -1,0 +1,2 @@
+M,T,T0,seed,sensitivity_mcs_B,scenarios,sensitivity_include_benchmarks,sensitivity_loss_diff_versions,sensitivity_cov_methods
+8,400,200,42,100,"1A, 2A, 2B, 2C, 3A",False,legacy,"rolling, ewma, shrinkage"

@@ -1,0 +1,1 @@
+GLIDE centrality sensitivity. Bars report mean relative MSFE across simulation exercises 1A, 2A, 2B, 2C, and 3A; lower values indicate better performance relative to equal weights.

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import (
     Callable,
     Dict,
@@ -74,7 +75,7 @@ LOSS_REGISTRY: Dict[str, Callable] = {
 
 
 # ===================================================================
-# 2.  LOCAL PAIRWISE LOSS-DIFFERENTIAL MODEL  (Richter–Smetanina style)
+# 2.  LOCAL PAIRWISE LOSS-DIFFERENTIAL MODEL  (Hyperedge style)
 # ===================================================================
 import numpy as np
 from typing import Tuple, Optional
@@ -119,10 +120,12 @@ def local_linear_ar_fit(
     t_filter: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Local linear AR(d) fit at rescaled time *target_frac*.
+    Local linear AR(d) fit at rescaled time *target_frac*, which is set to 1 as per the Hyperedge description.
+
+    Instead of returning the entire Theta path, appropriate residuals, gives the edge coefficients, residuals only.
 
     Builds the augmented Z_t(u) = [X_{t-1}, (t/T - u)*X_{t-1}] design
-    matrix (size 2*(d+1)) as in equation (3) of the paper, estimates
+    matrix (size 2*(d+1)) as in equation (3) of Richter, Smetanina, estimates
     theta(u) via WLS, and returns the first (d+1) components as rho(u).
 
     Parameters
@@ -158,18 +161,18 @@ def local_linear_ar_fit(
     # build augmented local linear design matrix Z_t(u) of size (n, 2*(d+1))
     # top block: X  (the standard AR regressors)
     # bottom block: (t/T - u) * X  (local linear expansion)
-    delta = (fracs - target_frac)[:, None]   # shape (n, 1)
-    X_ll = X * delta                          # (t/T - u) * X, shape (n, d+1)
-    Z = np.hstack([X, X_ll])                  # shape (n, 2*(d+1))
+    delta = (fracs - target_frac)[:, None]   
+    X_ll = X * delta                          
+    Z = np.hstack([X, X_ll])                  
 
     # WLS: (Z'WZ)^{-1} Z'WY  where W = diag(W_diag)
-    ZW = Z * W_diag[:, None]                  # row-wise kernel weighting
-    ZWZ = ZW.T @ Z                            # shape (2*(d+1), 2*(d+1))
-    ZWY = ZW.T @ Y                            # shape (2*(d+1),)
+    ZW = Z * W_diag[:, None]                  
+    ZWZ = ZW.T @ Z                          
+    ZWY = ZW.T @ Y                            
 
     try:
         theta = np.linalg.solve(ZWZ, ZWY)
-    except np.linalg.LinAlgError:
+    except np.linalg.LinAlgError: #fallback for singularity
         theta = np.zeros(2 * (d + 1))
 
     # rho(u) is the first (d+1) components of theta
@@ -186,12 +189,12 @@ def _estimate_full_sequence(
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Estimate rho(t/T) and compute residuals at every t/T, matching the
-    second code's est_theta_general vectorised loop.
+    Richter, Smetanina est_theta_general vectorised loop. (added for completeness)
 
     Returns
     -------
-    rho_seq  : shape (T-d, d+1)  — rho(t/T) for t = d, ..., T-1
-    resid_seq: shape (T-d,)      — L_t - X_{t-1}' rho(t/T)
+    rho_seq  : shape (T-d, d+1)
+    resid_seq: shape (T-d,)      
     """
     Y, X = _build_ar_design(series, d)
     n = len(Y)
@@ -236,8 +239,8 @@ def local_predict_scale(
 
     Computes residuals xi_t = L_t - X_{t-1}' rho_hat(t/T) for each t
     using the time-appropriate coefficient, matching est_theta_general
-    in the second code. Then runs local linear regression of xi_t^2 on
-    rescaled time, evaluated at u=1.
+    in Richter, Smetanina. Then runs local linear regression of xi_t^2 on
+    rescaled time, evaluated at u=1. Again, matching the Hyperedge methodology.
     """
     T = len(series)
     n = T - d
@@ -261,7 +264,7 @@ def local_predict_scale(
     try:
         varsigma = np.linalg.solve(FWF, FWsq)
         var_est = float(varsigma[0])           # first component = sigma^2(1)
-    except np.linalg.LinAlgError:
+    except np.linalg.LinAlgError: #fallback
         var_est = float(np.mean(sq_resid))
 
     return float(np.sqrt(max(var_est, EPS)))
@@ -276,16 +279,16 @@ def bic_lag_selection(
     correct_bic: bool = False,
 ) -> int:
     """
-    Select AR lag order d in {0,...,d_max} via BIC.
+    Select AR lag order d in {1,...,d_max} via BIC.
 
     Parameters
     ----------
     series      : 1-d array of length T
     d_max       : maximum lag order to consider
     h           : preliminary bandwidth for estimation
-    correct_bic : if True, uses the paper's BIC formulation (eq. 7):
+    correct_bic : if True, uses the Richter, Smetanina BIC formulation (eq. 7):
                       BIC(d) = sum_t log(sigma^2(t/T)) + (d+1)*log(T-d)
-                  if False (default), uses the original approximate formulation.
+                  if False (default), uses an approximate formulation. (used for speed in testing)
 
     Returns
     -------
@@ -300,13 +303,13 @@ def bic_lag_selection(
             continue
 
         if correct_bic:
-            # paper's BIC (eq. 7): sum over t of log(sigma^2(t/T)) + (d+1)*log(T-d)
+            # BIC (eq. 7): sum over t of log(sigma^2(t/T)) + (d+1)*log(T-d)
             # use time-varying residuals at each t/T then take as sigma^2(t/T) estimate
             _, resid_seq = _estimate_full_sequence(series, d, h)
             sigma2_seq = np.maximum(resid_seq ** 2, EPS)
             bic = np.sum(np.log(sigma2_seq)) + (d + 1) * np.log(T - d)
         else:
-            # original approximate formulation
+            # Approximate formulation
             beta, resid, W_diag = local_linear_ar_fit(
                 series, d, h, target_frac=1.0
             )
@@ -336,14 +339,12 @@ def cv_bandwidth_selection(
 ) -> Tuple[float, np.ndarray]:
     """
     Interleaved cross-validation for bandwidth selection, matching the
-    paper's fold structure zeta_j = {Q*k + j, k=1,2,...} with Q=n_folds.
+    Richter, Smetanina fold structure zeta_j = {Q*k + j, k=1,2,...} with Q=n_folds.
+
+    h_grid sets the search grid for h. Beware of low values, often leads to singularity issues, as too few observations are effective (nonzero weights).
 
     Each held-out observation i is predicted using the model estimated
-    without its fold, evaluated at its own rescaled time u = i/T, exactly
-    matching the second code's h1_CV_calc behaviour.
-
-    CV score is mean of per-fold means, matching np.mean(CV_Q) in the
-    second code.
+    without its fold, evaluated at its own rescaled time u = i/T.
 
     Returns (best_h, cv_scores).
     """
@@ -371,7 +372,7 @@ def cv_bandwidth_selection(
             t_filter[fold_idx + d] = 0.0
 
             # evaluate at each held-out observation's own rescaled time
-            # matching second code: resid[d:][dj] uses rho(s/T) at each s
+            # resid[d:][dj] uses rho(s/T) at each s
             sq_errors = np.empty(len(fold_idx))
             for k, idx in enumerate(fold_idx):
                 t_frac = (idx + d) / T
@@ -385,7 +386,7 @@ def cv_bandwidth_selection(
 
             fold_mse[j] = np.mean(sq_errors)
 
-        cv_scores[ih] = np.mean(fold_mse)   # mean of fold means, matching second code
+        cv_scores[ih] = np.mean(fold_mse)   # mean of fold means
 
     best_idx = int(np.nanargmin(cv_scores))
     return float(h_grid[best_idx]), cv_scores
@@ -400,7 +401,7 @@ def make_h_grid(
     return np.exp(np.linspace(np.log(h_min), np.log(h_max), n_points))
 
 
-# ---------- Full pairwise LD predictor ----------
+# ----------2.5 Full pairwise LD predictor, Richter-Smetanina formulation ----------
 
 @dataclass
 class PairwiseLDResult:
@@ -443,13 +444,13 @@ def predict_pairwise_ld(
     ----------
     delta_L     : 1-d array of loss differences L_t = Loss_A - Loss_B
     d_max       : maximum lag order for BIC selection
-    h1_grid     : bandwidth grid for first-stage CV (default: log-spaced)
-    h2_grid     : bandwidth grid for second-stage CV (default: log-spaced)
+    h1_grid     : bandwidth grid for first-stage CV
+    h2_grid     : bandwidth grid for second-stage CV
     fixed_d     : fix lag order, bypassing BIC selection
     fixed_h1    : fix first-stage bandwidth, bypassing CV
     fixed_h2    : fix second-stage bandwidth, bypassing CV
-    n_cv_folds  : number of interleaved CV folds (paper recommends Q>=20)
-    correct_bic : if True use paper's BIC formulation; if False use
+    n_cv_folds  : number of interleaved CV folds Q>=20
+    correct_bic : if True use full BIC formulation; if False use
                   approximate formulation (default False)
 
     Returns
@@ -503,12 +504,37 @@ def _v2_est_theta_general(
     series: np.ndarray,
     t_filter: np.ndarray,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Approximate the `functionality_v2` local-linear estimator without Numba.
+    '''
+    ***As given by Richter, Smetanina***
+    First-stage estimation of the model with p lags. In addition to theta, we calculate:
+    1. the fitted values for Y_t
+    2. the unconditional means for Y_t
+    3. model residuals for Y_t
 
-    The routine returns the full path of local coefficients and the implied
-    sequence of time-varying unconditional means used by the v2 code.
-    """
+    Parameters
+    ----------
+    d : int
+        Integer for the number of lags to include.
+    h : float
+        Float giving the bandwidth for the first-stage estimation, referred to as h1 in the paper.
+    Y : array_like
+        Array of Y data points on which to fit the model.
+    t_filter : array_like
+        Array of length T, filled with 0's where data points should be discarded for estimation
+        and 1's otherwise.
+
+    Returns
+    -------
+    theta_hat : array_like
+        Array of theta estimates of size T x 2d.
+    Y_hat : array_like
+        Array of fitted values of size T-1.
+    mu_hat : array_like
+        Array of unconditional means of size T-1.
+    resid : array_like
+        Array of first-stage residuals of size T-1.
+
+    '''
     Y = np.asarray(series, dtype=float)
     T = Y.shape[0]
     if T <= d:
@@ -559,7 +585,27 @@ def _v2_h1_cv_calc(
     series: np.ndarray,
     n_folds: int = 20,
 ) -> np.ndarray:
-    """Cross-validation scores matching the v2 fold construction."""
+    '''
+    ***As given by Richter, Smetanina***
+    Performs CV for h1.
+
+    Parameters
+    ----------
+    d : int
+        Integer for the number of lags to include.
+    h1_vector : array_like
+        Array of h1 candidates to perform CV.
+    Y : array_like
+        Array of data for the first-stage estimation.
+    Q : integer
+        Integer for the number of folds in the CV.
+
+    Returns
+    -------
+    h1_CV : array_like
+        Array of h1 CV distances.
+
+    '''
     Y = np.asarray(series, dtype=float)
     T = Y.shape[0]
     gridsize = len(h1_grid)
@@ -588,7 +634,25 @@ def _v2_h2_cv_calc(
     resid: np.ndarray,
     n_folds: int = 20,
 ) -> np.ndarray:
-    """Second-stage cross-validation scores matching the v2 logic."""
+    '''
+    ***As given by Richter, Smetanina***
+    Performs CV for h2.
+
+    Parameters
+    ----------
+    h2_vector : array_like
+        Array of h2 candidates to perform CV.
+    resid : array_like
+        Array of residuals from the first-stage estimation.
+    Q : integer
+        Integer for the number of folds in the CV.
+
+    Returns
+    -------
+    h2_CV : array_like
+        Array of h2 CV distances.
+
+    '''
     resid = np.asarray(resid, dtype=float)
     T = resid.shape[0]
     gridsize = len(h2_grid)
@@ -618,7 +682,25 @@ def _v2_bic_lag_selection(
     h1: float = 0.3,
     h2: float = 0.3,
 ) -> np.ndarray:
-    """BIC scores from the v2 implementation for d = 1, ..., d_max."""
+    '''
+    ***As given by Richter, Smetanina***
+    Calculates the BIC to select the lag length.
+
+     Paramaters
+    ----------
+    d_max : int
+        The maximum number of lags to consider in the BIC (default is 5).
+     h1 : float
+        The first-stage bandwidth to evaluate the BIC at (default is 0.3).
+    h2 : float
+        The second-stage bandwidth to evaluate the BIC at (default is 0.3).
+
+     Returns
+    -------
+    BIC : array_like
+    Array of BIC for d = 0, ..., d_max.
+
+    '''
     Y = np.asarray(series, dtype=float)
     T = Y.shape[0]
     bic = np.full(d_max, np.inf)
@@ -642,7 +724,31 @@ def _v2_next_period_forecast(
     sigsq_pred: float,
     std_resid: np.ndarray,
 ) -> Tuple[float, float]:
-    """Compute the v2 end-of-sample mean and probability forecast."""
+    '''
+    ***As given by Richter, Smetanina***
+    Note that the probability forecast is not fully implemented later, as it is unimportant for our purpose.
+    
+    Forecasts the mean of Y and the probability of Y being negative next period.
+
+    Parameters
+    ----------
+    X_pred : array_like
+        Array of X values to predict from.
+    rho_pred : array_like
+        Array of rho values to predict from.
+    sigsq_pred : float
+        Float of sigma squared to predict from.
+    std_resid : array_like
+        Array of standardized residuals to approximate the empirical distribution.
+
+    Returns
+    -------
+    Y_hat_pred : float
+        Float giving the predicted mean.
+    prob_np : float
+        Float giving the predicted probability of negative sign.
+
+    '''
     mean_fc = float(x_pred @ rho_pred)
     finite_resid = np.asarray(std_resid, dtype=float)
     finite_resid = finite_resid[np.isfinite(finite_resid)]
@@ -654,7 +760,7 @@ def _v2_next_period_forecast(
 
 
 def _standardize_residuals(std_resid: np.ndarray) -> np.ndarray:
-    """Center and scale residuals, with a safe zero fallback."""
+    """ Explicit helper to center and scale residuals, with a safe zero fallback."""
     x = np.asarray(std_resid, dtype=float)
     if x.size == 0:
         return x
@@ -677,7 +783,7 @@ def predict_pairwise_ld_v2(
     correct_bic: bool = True,
 ) -> PairwiseLDResult:
     """
-    Reproduce the alternative pairwise-LD workflow introduced in v2.
+    Reproduce the pairwise-LD workflow introduced in Richter, Smetanina.
 
     The returned `mu_hat` is the scalar quantity consumed by the graph layer:
     the last available value of the v2 `mu_path`.
@@ -967,7 +1073,6 @@ def _ensure_comparison_centrality_types(bt_cfg: BacktestConfig) -> BacktestConfi
     if bt_cfg.centrality_types is not None:
         return bt_cfg
     return replace(bt_cfg, centrality_types=DEFAULT_COMPARISON_CENTRALITY_TYPES)
-
 
 # ===================================================================
 # 3.  GRAPH LAYER
@@ -1276,6 +1381,74 @@ def full_combination_weights(
     return _solve_combination_qp(Sigma_r, r, alpha, gamma, M)
 
 
+def _solve_simplex_qp_active_set(
+    Q: np.ndarray,
+    c: np.ndarray,
+    tol: float = 1e-10,
+    max_iter: int = 100,
+) -> np.ndarray:
+    """
+    Solve min_w w'Qw + c'w subject to w >= 0 and sum(w)=1.
+
+    The problem is tiny in this project (number of forecasters), so an active-set
+    KKT solve is materially faster than repeatedly calling a generic optimizer.
+    """
+    Q = np.asarray(Q, dtype=float)
+    c = np.asarray(c, dtype=float)
+    M = len(c)
+    active = np.ones(M, dtype=bool)
+    w = np.zeros(M)
+    lam = 0.0
+
+    for _ in range(max_iter):
+        idx = np.where(active)[0]
+        if len(idx) == 0:
+            return np.ones(M) / M
+
+        Qaa = 2.0 * Q[np.ix_(idx, idx)]
+        ca = c[idx]
+        kkt = np.block([
+            [Qaa, np.ones((len(idx), 1))],
+            [np.ones((1, len(idx))), np.zeros((1, 1))],
+        ])
+        rhs = np.concatenate([-ca, [1.0]])
+
+        try:
+            sol = np.linalg.solve(kkt, rhs)
+        except LinAlgError:
+            sol = np.linalg.lstsq(kkt, rhs, rcond=None)[0]
+
+        w_candidate = np.zeros(M)
+        w_candidate[idx] = sol[:len(idx)]
+        lam = float(sol[-1])
+
+        if np.any(w_candidate[idx] < -tol):
+            drop_idx = idx[int(np.argmin(w_candidate[idx]))]
+            active[drop_idx] = False
+            continue
+
+        w_candidate = np.maximum(w_candidate, 0.0)
+        total = w_candidate.sum()
+        if total <= EPS:
+            return np.ones(M) / M
+        w_candidate /= total
+
+        gradient = 2.0 * Q @ w_candidate + c
+        inactive = ~active
+        if np.any(inactive) and np.any(gradient[inactive] + lam < -tol):
+            inactive_idx = np.where(inactive)[0]
+            add_idx = inactive_idx[int(np.argmin(gradient[inactive] + lam))]
+            active[add_idx] = True
+            continue
+
+        w = w_candidate
+        break
+    else:
+        w = simplex_project(w_candidate)
+
+    return simplex_project(w)
+
+
 def _solve_combination_qp(
     Sigma: np.ndarray,
     r: np.ndarray,
@@ -1290,6 +1463,11 @@ def _solve_combination_qp(
     #      = w' (Sigma + gamma I) w - (alpha r + 2 gamma wbar)' w + const
     Q = Sigma + gamma * np.eye(M)
     c = -(alpha * r + 2.0 * gamma * wbar)
+
+    try:
+        return _solve_simplex_qp_active_set(Q, c)
+    except Exception:
+        pass
 
     def objective(w):
         return w @ Q @ w + c @ w
@@ -2089,11 +2267,22 @@ def scenario_4A(M=8, T=400, T0=200, seed=42) -> ScenarioConfig:
     )
 
 
+def scenario_3A(M=8, T=400, T0=200, seed=42) -> ScenarioConfig:
+    """Display-name alias for the former scenario 4A."""
+    cfg = scenario_4A(M=M, T=T, T0=T0, seed=seed)
+    cfg.name = cfg.name.replace("4A_", "3A_", 1)
+    return cfg
+
+
 ALL_SCENARIO_FACTORIES = {
     "1A": scenario_1A,
     "2A": scenario_2A,
     "2B": scenario_2B,
     "2C": scenario_2C,
+    "3A": scenario_3A,
+}
+
+LEGACY_SCENARIO_FACTORIES = {
     "4A": scenario_4A,
 }
 
@@ -2112,6 +2301,7 @@ class BacktestConfig:
     fixed_h2: Optional[float] = None
     n_cv_folds: int = 5
     loss_diff_versions: Tuple[str, ...] = ("legacy", "v2")
+    fast_fixed_ld: bool = False
 
     # graph layer
     adjacency_type: str = "standardized"   # raw, standardized, thresholded
@@ -2145,6 +2335,7 @@ class BacktestConfig:
     var_max_lags: int = 3
     var_fixed_lag: Optional[int] = None
     var_ic: Literal["bic", "aic"] = "bic"
+    include_benchmarks: bool = True
 
     # misc
     min_history: int = 30  # minimum observations before producing weights
@@ -2270,12 +2461,13 @@ def run_backtest(
     )
 
     # Method names
-    method_names = [
-        "equal",
-        "recent_best",
-        "bates_granger_mv",
-        "var_error",
-    ]
+    method_names = ["equal"]
+    if bt_cfg.include_benchmarks:
+        method_names.extend([
+            "recent_best",
+            "bates_granger_mv",
+            "var_error",
+        ])
     for base_name, supported_variants in PAIRWISE_LD_METHOD_VARIANTS.items():
         for variant in active_loss_diff_versions:
             if variant not in supported_variants:
@@ -2348,6 +2540,7 @@ def run_backtest(
                             fixed_h1=bt_cfg.fixed_h1,
                             fixed_h2=bt_cfg.fixed_h2,
                             n_cv_folds=bt_cfg.n_cv_folds,
+                            fast_fixed=bt_cfg.fast_fixed_ld,
                         )
                     except Exception as exc:
                         if verbose:
@@ -2472,29 +2665,32 @@ def run_backtest(
         res.weights["equal"][oos_idx] = w_eq
 
         # 2. Recent best
-        recent_best_window = (
-            selected_window if bt_cfg.estimate_window else bt_cfg.recent_best_window
-        )
-        w_rb = recent_best_selection(losses[:hist_end], recent_best_window)
-        res.weights["recent_best"][oos_idx] = w_rb
+        if "recent_best" in res.weights:
+            recent_best_window = (
+                selected_window if bt_cfg.estimate_window else bt_cfg.recent_best_window
+            )
+            w_rb = recent_best_selection(losses[:hist_end], recent_best_window)
+            res.weights["recent_best"][oos_idx] = w_rb
 
         # 3. Bates-Granger MV
-        bg_window = selected_window if bt_cfg.estimate_window else bt_cfg.bg_window
-        w_bgmv = bates_granger_mv_weights(errors_hist, bg_window)
-        res.weights["bates_granger_mv"][oos_idx] = w_bgmv
+        if "bates_granger_mv" in res.weights:
+            bg_window = selected_window if bt_cfg.estimate_window else bt_cfg.bg_window
+            w_bgmv = bates_granger_mv_weights(errors_hist, bg_window)
+            res.weights["bates_granger_mv"][oos_idx] = w_bgmv
 
         # 4. VAR benchmark on forecast errors
-        var_window = selected_window if bt_cfg.estimate_window else bt_cfg.var_window
-        w_var, var_lags, _, _ = var_error_weights(
-            errors_hist,
-            max_lags=bt_cfg.var_max_lags,
-            fixed_lag=bt_cfg.var_fixed_lag,
-            window=var_window,
-            ic=bt_cfg.var_ic,
-            ridge=bt_cfg.ridge_cov,
-        )
-        res.var_lag_selected[oos_idx] = var_lags
-        res.weights["var_error"][oos_idx] = w_var
+        if "var_error" in res.weights:
+            var_window = selected_window if bt_cfg.estimate_window else bt_cfg.var_window
+            w_var, var_lags, _, _ = var_error_weights(
+                errors_hist,
+                max_lags=bt_cfg.var_max_lags,
+                fixed_lag=bt_cfg.var_fixed_lag,
+                window=var_window,
+                ic=bt_cfg.var_ic,
+                ridge=bt_cfg.ridge_cov,
+            )
+            res.var_lag_selected[oos_idx] = var_lags
+            res.weights["var_error"][oos_idx] = w_var
 
         # 5. LD-driven methods for each pairwise model variant
         for variant, state in loss_diff_states.items():
@@ -2799,13 +2995,66 @@ except ImportError:
 
 
 METHOD_FAMILY_COLORS = {
-    "full_gcsr": "#0B3954",
-    "graph_only": "#B15E3E",
-    "rs_selection": "#6B8E23",
-    "bates_granger_mv": "#2A7F62",
-    "var_error": "#7A5C61",
-    "recent_best": "#8B6F47",
-    "equal": "#4D4D4D",
+    "full_gcsr": "#D55E00",
+    "graph_only": "#009E73",
+    "rs_selection": "#CC79A7",
+    "bates_granger_mv": "#E69F00",
+    "var_error": "#0072B2",
+    "recent_best": "#666666",
+    "equal": "#111111",
+}
+
+PAPER_METHOD_ORDER = (
+    "equal",
+    "var_error",
+    "full_gcsr_eigenvector",
+    "full_gcsr_pagerank",
+    "full_gcsr_softmax",
+    "graph_only_eigenvector",
+    "graph_only_pagerank",
+    "graph_only_softmax",
+    "rs_selection_v2",
+    "rs_selection",
+    "recent_best",
+)
+
+PAPER_ADAPTABILITY_METHOD_ORDER = (
+    "equal",
+    "bates_granger_mv",
+    "var_error",
+    "graph_only_eigenvector",
+    "graph_only_pagerank",
+    "graph_only_softmax",
+    "full_gcsr_eigenvector",
+    "full_gcsr_pagerank",
+    "full_gcsr_softmax",
+    "rs_selection",
+    "rs_selection_v2",
+    "recent_best",
+)
+
+CENTRALITY_DISPLAY_LABELS = {
+    "eigenvector": "eigenvector",
+    "pagerank": "pagerank",
+    "softmax": "softmax",
+    "rowsum": "row sum",
+}
+
+BASE_METHOD_DISPLAY_LABELS = {
+    "equal": "Equal weights",
+    "var_error": "VAR",
+    "bates_granger_mv": "Bates-Granger",
+    "recent_best": "Recent-best",
+    "rs_selection": "Hyperedge RS selection",
+    "rs_selection_v2": "RS selection",
+    "actual": "Actual",
+}
+
+CENTRALITY_COLORS = {
+    "eigenvector": "#0072B2",
+    "pagerank": "#D55E00",
+    "softmax": "#009E73",
+    "rowsum": "#CC79A7",
 }
 
 CENTRALITY_LINESTYLES = {
@@ -2856,15 +3105,15 @@ def set_plot_style():
     """Set a readable, grayscale-friendly plotting style."""
     plt.rcParams.update({
         "figure.figsize": (12, 6),
-        "axes.titlesize": 15,
+        "axes.titlesize": 17,
         "axes.titleweight": "bold",
-        "axes.labelsize": 12,
+        "axes.labelsize": 14,
         "axes.titlepad": 10,
         "axes.labelpad": 8,
-        "xtick.labelsize": 11,
-        "ytick.labelsize": 11,
-        "legend.fontsize": 10.5,
-        "legend.title_fontsize": 11,
+        "xtick.labelsize": 12,
+        "ytick.labelsize": 12,
+        "legend.fontsize": 11.5,
+        "legend.title_fontsize": 12,
         "figure.dpi": 140,
         "savefig.dpi": 300,
         "savefig.bbox": "tight",
@@ -2875,8 +3124,8 @@ def set_plot_style():
         "grid.linewidth": 0.6,
         "axes.spines.top": False,
         "axes.spines.right": False,
-        "lines.linewidth": 2.0,
-        "lines.markersize": 6.0,
+        "lines.linewidth": 2.4,
+        "lines.markersize": 6.5,
         "legend.frameon": True,
         "legend.framealpha": 0.95,
         "legend.facecolor": "white",
@@ -2888,14 +3137,83 @@ def set_plot_style():
 set_plot_style()
 
 
+def scenario_display_label(name: Union[str, int]) -> str:
+    """Map internal scenario identifiers to paper-facing labels."""
+    text = str(name)
+    return "3A" if text == "4A" else text
+
+
+def _method_order_index(method: str, order: Sequence[str] = PAPER_METHOD_ORDER) -> int:
+    """Return a stable index for display ordering with graceful fallback."""
+    order_map = {name: idx for idx, name in enumerate(order)}
+    if method in order_map:
+        return order_map[method]
+    family = _method_family(method)
+    centrality_type = _method_centrality_type(method)
+    family_fallback = {
+        "equal": 0,
+        "var_error": 1,
+        "full_gcsr": 2,
+        "graph_only": 3,
+        "rs_selection": 4,
+        "recent_best": 5,
+        "bates_granger_mv": 6,
+    }
+    return 100 + 10 * family_fallback.get(family, 9) + CENTRALITY_ORDER.get(centrality_type, 9)
+
+
+def order_methods_for_display(
+    methods: Sequence[str],
+    order: Sequence[str] = PAPER_METHOD_ORDER,
+) -> List[str]:
+    """Order available method names for consistent paper legends."""
+    available = list(dict.fromkeys(methods))
+    order_map = {name: idx for idx, name in enumerate(order)}
+    ordered = [name for name in order if name in available]
+    remainder = [name for name in available if name not in order_map]
+    remainder.sort(key=_method_sort_key)
+    return ordered + remainder
+
+
+def method_display_label(method: str, math: bool = True) -> str:
+    """Map internal method names to paper-facing labels."""
+    if method in BASE_METHOD_DISPLAY_LABELS:
+        return BASE_METHOD_DISPLAY_LABELS[method]
+
+    family = _method_family(method)
+    centrality_type = _method_centrality_type(method)
+    family_label = {
+        "full_gcsr": "GLIDER",
+        "graph_only": "GLIDE",
+    }.get(family)
+
+    if family_label is not None:
+        if centrality_type is None:
+            return family_label
+        centrality_label = CENTRALITY_DISPLAY_LABELS.get(centrality_type, centrality_type)
+        if math:
+            return rf"{family_label}$_{{\mathrm{{{centrality_label}}}}}$"
+        return f"{family_label} ({centrality_label})"
+
+    return method.replace("_", " ").title()
+
+
 def _method_plot_style(name: str) -> Dict[str, object]:
     """Consistent style mapping used across performance and diagnostics plots."""
     family = _method_family(name)
     centrality_type = _method_centrality_type(name)
+    linestyle = CENTRALITY_LINESTYLES.get(centrality_type, "-")
+    marker = CENTRALITY_MARKERS.get(centrality_type, FAMILY_MARKERS.get(family, "o"))
+    if name == "rs_selection_v2":
+        linestyle = "-"
+        marker = "P"
+    elif name == "rs_selection":
+        linestyle = "--"
+        marker = "X"
     return {
         "color": METHOD_FAMILY_COLORS.get(family, "#4D4D4D"),
-        "linestyle": CENTRALITY_LINESTYLES.get(centrality_type, "-"),
-        "marker": CENTRALITY_MARKERS.get(centrality_type, FAMILY_MARKERS.get(family, "o")),
+        "linestyle": linestyle,
+        "marker": marker,
         "hatch": CENTRALITY_HATCHES.get(centrality_type, ""),
     }
 
@@ -2926,12 +3244,23 @@ def _apply_publication_legend(
     ncol: int = 1,
     loc: str = "best",
     fontsize: float = 10.5,
+    method_order: Optional[Sequence[str]] = None,
+    display_labels: bool = True,
     **kwargs,
 ):
     """Draw a compact, readable legend suited for paper-ready figures."""
     handles, labels = ax.get_legend_handles_labels()
     if not handles:
         return None
+    if method_order is not None:
+        order_map = {name: idx for idx, name in enumerate(method_order)}
+        pairs = sorted(
+            zip(handles, labels),
+            key=lambda pair: (order_map.get(pair[1], 999), _method_order_index(pair[1])),
+        )
+        handles, labels = [list(values) for values in zip(*pairs)]
+    if display_labels:
+        labels = [method_display_label(label) for label in labels]
     legend = ax.legend(
         handles,
         labels,
@@ -3174,6 +3503,7 @@ def plot_weight_timeseries(
     methods=None,
     time_axis: Optional[Sequence[object]] = None,
     x_label: str = "Time",
+    model_names: Optional[Sequence[str]] = None,
 ):
     """Time series of weights for selected methods."""
     if methods is None:
@@ -3191,14 +3521,20 @@ def plot_weight_timeseries(
         if w is None:
             continue
         M = w.shape[1]
+        if model_names is None:
+            labels = [f"M{j+1}" for j in range(M)]
+        else:
+            labels = list(model_names)
+            if len(labels) != M:
+                raise ValueError("model_names must match the number of forecast models.")
         palette = plt.get_cmap("tab20c")(np.linspace(0.15, 0.85, M))
         axes[idx].stackplot(
             time_axis, w.T,
-            labels=[f"M{j+1}" for j in range(M)],
+            labels=labels,
             colors=palette,
             alpha=0.8,
         )
-        axes[idx].set_title(f"Weights: {name}")
+        axes[idx].set_title(f"Weights: {method_display_label(name)}")
         axes[idx].set_ylabel("Weight")
         axes[idx].set_ylim(0, 1)
         if M <= 10:
@@ -3380,7 +3716,7 @@ def plot_msfe_barplot(res: BacktestResult, ax=None):
     for bar, name in zip(bars, df.Method):
         _apply_bar_patch_style(bar, name)
     ax.axvline(1.0, color="#2F2F2F", ls="--", linewidth=0.8)
-    ax.set_xlabel("Relative MSFE (vs Equal Weights)")
+    ax.set_xlabel("Relative MSFE (vs Equal weights)")
     ax.set_title("OOS Performance")
     ax.invert_yaxis()
     return ax
@@ -3505,7 +3841,7 @@ def plot_mc_boxplot(mc: MCResult):
     else:
         ax.boxplot([df[c].values for c in order], vert=False, labels=order)
     ax.axvline(1.0, color="#2F2F2F", ls="--", linewidth=0.8)
-    ax.set_xlabel("Relative MSFE (vs Equal Weights)")
+    ax.set_xlabel("Relative MSFE (vs Equal weights)")
     ax.set_title(f"MC Distribution — {mc.scenario_name} ({mc.n_reps} reps)")
     fig.tight_layout()
     return fig
@@ -4160,6 +4496,7 @@ def compute_adaptability_diagnostics(
     smooth_window: int = 5,
     min_event_spacing: int = 3,
     target_oracle_weight: float = 0.8,
+    event_times: Optional[Sequence[int]] = None,
 ) -> AdaptabilityResult:
     """
     Compute simulation-based adaptability diagnostics after latent oracle switches.
@@ -4177,6 +4514,8 @@ def compute_adaptability_diagnostics(
         smooth_window (int): Rolling window used to smooth relative gap profiles
         min_event_spacing (int): Minimum spacing between retained switch events
         target_oracle_weight (float): Oracle-overlap target used for recovery delays
+        event_times (Sequence[int] | None): Optional known event dates. When
+            supplied, these dates are used instead of latent-oracle index switches.
 
     Returns:
         AdaptabilityResult: Event-study profiles and summary metrics by method
@@ -4185,11 +4524,19 @@ def compute_adaptability_diagnostics(
         methods = list(res.weights.keys())
     methods = [m for m in methods if m in res.weights]
 
-    event_times, oracle = identify_oracle_switches(
-        data,
-        start_time=data.config.T0,
-        min_spacing=min_event_spacing,
-    )
+    if event_times is None:
+        event_times, oracle = identify_oracle_switches(
+            data,
+            start_time=data.config.T0,
+            min_spacing=min_event_spacing,
+        )
+    else:
+        oracle = compute_latent_oracle_indices(data)
+        event_times = np.asarray(event_times, dtype=int)
+        event_times = event_times[
+            (event_times >= data.config.T0)
+            & (event_times < data.config.T)
+        ]
     n_events = len(event_times)
     oracle_models = oracle[event_times] if n_events else np.array([], dtype=int)
     oracle_combo_weights = compute_latent_oracle_combination_weights(data)
@@ -4395,54 +4742,6 @@ def plot_adaptability_half_life(
     ax.invert_yaxis()
     fig.tight_layout()
     return fig
-
-
-def document_adaptability_measure() -> pd.DataFrame:
-    """
-    Summarize the design choices behind the adaptability diagnostic.
-
-    Returns:
-        pd.DataFrame: Compact documentation table for the metric definition
-    """
-    rows = [
-        {
-            "Item": "Metric",
-            "Description": "Post-switch excess latent-risk half-life.",
-            "Details": "A simulation-specific diagnostic rather than a named classical estimator.",
-            "Reference": "This implementation; inspired by Giacomini & Rossi (2009) and Tian & Anderson (2014)",
-        },
-        {
-            "Item": "Event definition",
-            "Description": "A switch occurs when the latent oracle forecaster changes.",
-            "Details": "The latent oracle is argmin_j {b_{j,t}^2 + sigma_{j,t}^2} under squared loss.",
-            "Reference": "Simulation design in this module",
-        },
-        {
-            "Item": "Gap series",
-            "Description": "Track excess latent risk relative to the oracle combination.",
-            "Details": (
-                "g_{m,e}(h) = R_m(t_e+h) - R^*(t_e+h), where R^* uses the "
-                "time-varying simplex-constrained oracle combination under the latent DGP."
-            ),
-            "Reference": "This implementation",
-        },
-        {
-            "Item": "Half-life",
-            "Description": "First horizon where the smoothed relative latent-risk gap is at most half the initial gap.",
-            "Details": "Smaller half-life means faster adaptation to the new best forecaster.",
-            "Reference": "This implementation",
-        },
-        {
-            "Item": "Interpretation",
-            "Description": "Separates immediate robustness from dynamic re-learning speed.",
-            "Details": (
-                "Combination methods such as GCSR are evaluated on how quickly their "
-                "latent expected risk approaches the oracle combination after regime shifts."
-            ),
-            "Reference": "Tian & Anderson (2014)",
-        },
-    ]
-    return pd.DataFrame(rows)
 
 
 # ===================================================================
@@ -4840,6 +5139,7 @@ def plot_empirical_weight_comparison(
         methods=methods,
         time_axis=time_axis,
         x_label="Target Period",
+        model_names=study.forecaster_ids,
     )
 
 
@@ -5167,6 +5467,2617 @@ def plot_sensitivity_summary(
     fig.suptitle(title, y=1.02)
     fig.tight_layout()
     return fig
+
+
+# ===================================================================
+# 13b.  PAPER-READY CSV-DRIVEN REPLOTS
+# ===================================================================
+
+PAPER_REPLOT_SIMULATION_METHODS = (
+    "equal",
+    "full_gcsr_pagerank",
+    "rs_selection",
+    "rs_selection_v2",
+    "graph_only_pagerank",
+    "var_error",
+    "recent_best",
+)
+
+PAPER_REPLOT_HEADLINE_METHODS = (
+    "equal",
+    "full_gcsr_softmax",
+    "graph_only_softmax",
+    "rs_selection_v2",
+    "rs_selection",
+)
+
+PAPER_REPLOT_RS_ORIGINAL_METHODS = (
+    "rs_selection_v2",
+    "graph_only_v2_eigenvector",
+    "graph_only_v2_pagerank",
+    "graph_only_v2_softmax",
+    "full_gcsr_v2_eigenvector",
+    "full_gcsr_v2_pagerank",
+    "full_gcsr_v2_softmax",
+)
+
+PAPER_WEIGHT_PATH_METHODS = (
+    "equal",
+    "bates_granger_mv",
+    "var_error",
+    "full_gcsr_softmax",
+    "graph_only_softmax",
+    "rs_selection_v2",
+    "rs_selection",
+    "recent_best",
+)
+
+
+def _paper_read_csv(path: Union[str, Path]) -> pd.DataFrame:
+    """Read a required CSV with a clear error message."""
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Required paper-replot CSV not found: {path}")
+    return pd.read_csv(path)
+
+
+def _paper_save_figure(
+    fig,
+    output_dir: Path,
+    stem: str,
+    artifacts: Dict[str, List[str]],
+    caption: Optional[str] = None,
+) -> None:
+    """Save a title-free paper figure as PDF/PNG, with an optional caption file."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for ax in fig.axes:
+        ax.set_title("")
+    if getattr(fig, "_suptitle", None) is not None:
+        fig._suptitle.set_text("")
+    pdf_path = output_dir / f"{stem}.pdf"
+    png_path = output_dir / f"{stem}.png"
+    fig.savefig(pdf_path, bbox_inches="tight", pad_inches=0.22)
+    fig.savefig(png_path, bbox_inches="tight", pad_inches=0.22)
+    plt.close(fig)
+    paths = [str(pdf_path), str(png_path)]
+    if caption is not None:
+        caption_path = output_dir / f"{stem}_caption.txt"
+        caption_path.write_text(caption.strip() + "\n")
+        paths.append(str(caption_path))
+    artifacts[stem] = paths
+
+
+def _paper_date_axis_from_metadata(
+    df: pd.DataFrame,
+    metadata: Optional[pd.DataFrame],
+    period_col: str = "oos_period",
+) -> np.ndarray:
+    """Attach a date axis when exported OOS metadata is available."""
+    if metadata is None or metadata.empty or period_col not in df.columns:
+        return df[period_col].to_numpy() if period_col in df.columns else np.arange(len(df))
+    if period_col not in metadata.columns or "period_dt" not in metadata.columns:
+        return df[period_col].to_numpy()
+    mapper = metadata.set_index(period_col)["period_dt"].to_dict()
+    values = pd.to_datetime(df[period_col].map(mapper), errors="coerce")
+    if values.notna().all():
+        return values.to_numpy()
+    return df[period_col].to_numpy()
+
+
+def _paper_apply_time_axis(ax, x_axis: Sequence[object], x_label: str = "Time") -> None:
+    """Format a paper-replot x-axis."""
+    _format_plot_time_axis(ax, x_axis, x_label=x_label)
+    ax.tick_params(axis="x", rotation=0)
+
+
+def _paper_plot_line(
+    ax,
+    x_axis: Sequence[object],
+    y_values: Sequence[float],
+    method: str,
+    n_points: Optional[int] = None,
+    linewidth: Optional[float] = None,
+    zorder: Optional[int] = None,
+) -> None:
+    """Plot one consistently styled paper line."""
+    y_values = np.asarray(y_values, dtype=float)
+    n_points = int(n_points or len(y_values))
+    style = _method_plot_style(method)
+    ax.plot(
+        x_axis,
+        y_values,
+        label=method,
+        color=style["color"],
+        linestyle=style["linestyle"],
+        linewidth=linewidth if linewidth is not None else (2.9 if _is_gcsr_method(method) else 2.4),
+        alpha=0.96,
+        zorder=zorder if zorder is not None else (3 if _is_gcsr_method(method) else 2),
+        **_line_marker_kwargs(n_points, style["marker"]),
+    )
+
+
+def _paper_load_empirical_panel(
+    forecast_path: Union[str, Path],
+    truth_path: Union[str, Path],
+) -> Tuple[pd.DataFrame, List[str]]:
+    """Load and align an empirical survey panel for data-section figures."""
+    forecasts_df = _paper_read_csv(forecast_path)
+    truth_df = _paper_read_csv(truth_path)
+    forecaster_ids = [col for col in forecasts_df.columns if col != "TARGET_PERIOD"]
+    merged = forecasts_df.merge(
+        truth_df[["TARGET_PERIOD", "actual"]],
+        on="TARGET_PERIOD",
+        how="left",
+    )
+    merged["period_dt"] = pd.to_datetime(merged["TARGET_PERIOD"])
+    numeric_cols = forecaster_ids + ["actual"]
+    merged[numeric_cols] = merged[numeric_cols].astype(float)
+    merged = merged.dropna(subset=["actual"]).sort_values("period_dt").reset_index(drop=True)
+    return merged, forecaster_ids
+
+
+def _paper_plot_forecaster_heatmap(
+    merged: pd.DataFrame,
+    forecaster_ids: Sequence[str],
+    title: str,
+):
+    """Create a forecaster correlation heatmap with y and f_i labels."""
+    columns = ["actual"] + list(forecaster_ids)
+    labels = ["$y$"] + [rf"$f_{{{idx}}}$" for idx in range(1, len(forecaster_ids) + 1)]
+    corr = merged[columns].corr()
+    corr.index = labels
+    corr.columns = labels
+    side = max(6.6, min(10.5, 0.48 * len(labels) + 2.0))
+    fig, ax = plt.subplots(figsize=(side, side))
+    if HAS_SEABORN:
+        sns.heatmap(
+            corr,
+            ax=ax,
+            vmin=-1.0,
+            vmax=1.0,
+            center=0.0,
+            cmap="vlag",
+            annot=True,
+            fmt=".2f",
+            annot_kws={"fontsize": 9.5},
+            square=True,
+            linewidths=0.45,
+            linecolor="white",
+            cbar_kws={"shrink": 0.75, "label": "Correlation"},
+        )
+    else:
+        im = ax.imshow(corr.values, cmap="RdBu_r", vmin=-1.0, vmax=1.0)
+        fig.colorbar(im, ax=ax, shrink=0.75, label="Correlation")
+        ax.set_xticks(np.arange(len(labels)))
+        ax.set_yticks(np.arange(len(labels)))
+        ax.set_xticklabels(labels)
+        ax.set_yticklabels(labels)
+        for i in range(len(labels)):
+            for j in range(len(labels)):
+                ax.text(j, i, f"{corr.iloc[i, j]:.2f}", ha="center", va="center", fontsize=9.5)
+    ax.tick_params(axis="x", labelrotation=45)
+    ax.tick_params(axis="y", labelrotation=0)
+    fig.tight_layout()
+    return fig
+
+
+def _paper_plot_spf_range(
+    merged: pd.DataFrame,
+    forecaster_ids: Sequence[str],
+    title: str,
+    y_label: str,
+):
+    """Plot realized values and the survey forecast range."""
+    x_axis = merged["period_dt"]
+    forecasts = merged[list(forecaster_ids)]
+    fig, ax = plt.subplots(figsize=(9.0, 4.8))
+    ax.fill_between(
+        x_axis,
+        forecasts.min(axis=1).to_numpy(),
+        forecasts.max(axis=1).to_numpy(),
+        color="#56B4E9",
+        alpha=0.24,
+        linewidth=0,
+        label="SPF range",
+    )
+    ax.plot(
+        x_axis,
+        forecasts.median(axis=1).to_numpy(),
+        color="#009E73",
+        linewidth=2.7,
+        linestyle="--",
+        label="SPF median",
+    )
+    ax.plot(
+        x_axis,
+        merged["actual"].to_numpy(),
+        color="#111111",
+        linewidth=3.2,
+        label="Actual",
+        zorder=4,
+    )
+    ax.set_ylabel(y_label)
+    _paper_apply_time_axis(ax, x_axis, x_label="Target Period")
+    _apply_publication_legend(ax, ncol=3, loc="best", fontsize=11.0, display_labels=False)
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    return fig
+
+
+def _paper_write_rs_original_table(
+    csv_root: Path,
+    output_dir: Path,
+    artifacts: Dict[str, List[str]],
+) -> None:
+    """Write the original Richter-Smetanina methodology comparison table."""
+    specs = (
+        ("Inflation", "empirical_inflation_next_quarter"),
+        ("Unemployment", "empirical_unemployment_monthly"),
+    )
+    rows = []
+    for dataset_label, study_dir in specs:
+        perf = _paper_read_csv(csv_root / "empirical_studies" / study_dir / "performance_table.csv")
+        perf = perf[perf["Method"].isin(PAPER_REPLOT_RS_ORIGINAL_METHODS)].copy()
+        for _, row in perf.iterrows():
+            rows.append({
+                "Application": dataset_label,
+                "Method": method_display_label(row["Method"]),
+                "_raw_method": row["Method"],
+                "Mean_Loss": float(row["Mean_Loss"]),
+                "Rel_MSFE": float(row["Rel_MSFE"]),
+                "Total_Loss": float(row["Total_Loss"]),
+            })
+
+    table = pd.DataFrame(rows)
+    order_map = {method: idx for idx, method in enumerate(PAPER_REPLOT_RS_ORIGINAL_METHODS)}
+    table["_order"] = table["_raw_method"].map(order_map)
+    table = (
+        table.sort_values(["Application", "_order"])
+        .drop(columns=["_order", "_raw_method"])
+        .reset_index(drop=True)
+    )
+
+    csv_path = output_dir / "rs_original_methodology_performance.csv"
+    tex_path = output_dir / "rs_original_methodology_performance.tex"
+    table.to_csv(csv_path, index=False)
+    latex_cols = ["Application", "Method", "Mean_Loss", "Rel_MSFE", "Total_Loss"]
+    latex = table[latex_cols].to_latex(
+        index=False,
+        escape=False,
+        float_format="%.3f",
+        caption="Original Richter-Smetanina methodology performance against GLIDE and GLIDER combinations.",
+        label="tab:rs-original-methodology-performance",
+    )
+    tex_path.write_text(latex)
+    artifacts["rs_original_methodology_performance"] = [str(csv_path), str(tex_path)]
+
+
+def _paper_plot_simulation_forecasts_errors(
+    csv_root: Path,
+    output_dir: Path,
+    artifacts: Dict[str, List[str]],
+) -> None:
+    """Create uncluttered simulation forecast and forecast-error small multiples."""
+    scenario_dirs = {
+        "1A": "mcs_backtest_1A",
+        "2A": "res_2A",
+        "2B": "res_2B",
+        "2C": "mcs_backtest_2C",
+        "3A": "mcs_backtest_4A",
+    }
+    for scenario_key, backtest_dir in scenario_dirs.items():
+        base = csv_root / "backtests" / backtest_dir
+        forecasts = _paper_read_csv(base / "combined_forecasts.csv")
+        actual = _paper_read_csv(base / "y_oos.csv")
+        df = forecasts.merge(actual, on="oos_period", how="left")
+        methods = [method for method in PAPER_REPLOT_SIMULATION_METHODS if method in df.columns]
+        methods = order_methods_for_display(methods)
+        x_axis = df["oos_period"].to_numpy()
+        n_methods = len(methods)
+
+        fig, axes = plt.subplots(
+            n_methods,
+            2,
+            figsize=(10.8, 1.20 * n_methods + 1.8),
+            sharex=True,
+            gridspec_kw={"width_ratios": [1.0, 1.0], "wspace": 0.12, "hspace": 0.18},
+        )
+        if n_methods == 1:
+            axes = np.asarray([axes])
+
+        for row_idx, method in enumerate(methods):
+            forecast_ax = axes[row_idx, 0]
+            error_ax = axes[row_idx, 1]
+            style = _method_plot_style(method)
+            display_label = method_display_label(method)
+            method_color = "#6A6A6A" if method == "equal" else style["color"]
+            method_linestyle = "--" if method == "equal" else style["linestyle"]
+
+            forecast_ax.plot(
+                x_axis,
+                df["actual"].to_numpy(),
+                color="#111111",
+                linewidth=1.7,
+                alpha=0.82,
+                label="Actual",
+            )
+            forecast_ax.plot(
+                x_axis,
+                df[method].to_numpy(dtype=float),
+                color=method_color,
+                linestyle=method_linestyle,
+                linewidth=2.05,
+                label="_nolegend_",
+            )
+
+            errors = df["actual"].to_numpy(dtype=float) - df[method].to_numpy(dtype=float)
+            error_ax.axhline(0.0, color="#111111", linewidth=0.9, linestyle=":")
+            error_ax.plot(
+                x_axis,
+                errors,
+                color=method_color,
+                linestyle=method_linestyle,
+                linewidth=2.05,
+            )
+
+            forecast_ax.set_ylabel(
+                display_label,
+                rotation=0,
+                ha="right",
+                va="center",
+                labelpad=18,
+                fontsize=10.5,
+            )
+            for ax in (forecast_ax, error_ax):
+                ax.grid(True, alpha=0.20)
+                ax.tick_params(axis="both", labelsize=8.8)
+                ax.spines["top"].set_visible(False)
+                ax.spines["right"].set_visible(False)
+            if row_idx < n_methods - 1:
+                forecast_ax.tick_params(axis="x", labelbottom=False)
+                error_ax.tick_params(axis="x", labelbottom=False)
+
+        handles, labels = axes[0, 0].get_legend_handles_labels()
+        actual_handles = [handle for handle, label in zip(handles, labels) if label == "Actual"]
+        if actual_handles:
+            axes[0, 0].legend(
+                handles=[actual_handles[0]],
+                labels=["Actual"],
+                loc="upper left",
+                fontsize=8.6,
+                frameon=True,
+                framealpha=0.92,
+            )
+
+        fig.supxlabel("OOS period", y=0.025, fontsize=11.5)
+        fig.subplots_adjust(left=0.19, right=0.985, top=0.965, bottom=0.08, wspace=0.12, hspace=0.18)
+        _paper_save_figure(
+            fig,
+            output_dir,
+            f"simulation_{scenario_display_label(scenario_key)}_forecasts_errors",
+            artifacts,
+            caption=(
+                f"Simulation Scenario {scenario_display_label(scenario_key)} forecast paths "
+                "and forecast errors for the selected combination methods. Each row shows one "
+                "method. The left column overlays the method's combined forecast with the "
+                "realized value. The right column reports the forecast error, defined as the "
+                "realized value minus the combined forecast, with the dotted zero line marking "
+                "an exact forecast. "
+                f"The simulation was regenerated from the CSV export with T={int(x_axis.max()) + 1} "
+                f"and T0={int(x_axis.min())}."
+            ),
+        )
+
+
+def _paper_plot_sensitivity_bars(
+    data: pd.DataFrame,
+    labels: Sequence[str],
+    values: Sequence[float],
+    title: str,
+    output_dir: Path,
+    stem: str,
+    artifacts: Dict[str, List[str]],
+    methods: Optional[Sequence[str]] = None,
+    xlabel: str = "Mean relative MSFE",
+    note: Optional[str] = None,
+    caption: Optional[str] = None,
+    colors: Optional[Sequence[str]] = None,
+) -> None:
+    """Shared compact sensitivity bar plot."""
+    fig, ax = plt.subplots(figsize=(7.4, 4.4))
+    y_pos = np.arange(len(labels))
+    bars = ax.barh(y_pos, values, color="#D9D9D9", edgecolor="#2F2F2F", linewidth=0.9)
+    if methods is not None:
+        for bar, method in zip(bars, methods):
+            _apply_bar_patch_style(bar, method)
+    if colors is not None:
+        for bar, color in zip(bars, colors):
+            bar.set_facecolor(color)
+            bar.set_alpha(0.90)
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(labels)
+    ax.invert_yaxis()
+    ax.axvline(1.0, color="#111111", linewidth=1.1, linestyle=":")
+    ax.set_xlabel(xlabel)
+    if note:
+        ax.text(
+            0.0,
+            -0.18,
+            note,
+            transform=ax.transAxes,
+            ha="left",
+            va="top",
+            fontsize=10.0,
+            color="#4D4D4D",
+        )
+    for ypos, value in zip(y_pos, values):
+        ax.text(value + 0.01, ypos, f"{value:.3f}", va="center", fontsize=10.5)
+    fig.tight_layout()
+    _paper_save_figure(fig, output_dir, stem, artifacts, caption=caption)
+
+
+def _paper_load_simulation_sensitivity_results(csv_root: Path) -> pd.DataFrame:
+    """Load exercise-level sensitivity rows for each simulated scenario."""
+    rows = []
+    base = csv_root / "sensitivity_sweeps"
+    scenario_order = ("1A", "2A", "2B", "2C", "4A")
+    for scenario_key in scenario_order:
+        path = base / f"simulation_{scenario_key}" / "results_table.csv"
+        if not path.exists():
+            continue
+        df = _paper_read_csv(path)
+        df["Scenario"] = scenario_display_label(scenario_key)
+        df["_scenario_order"] = len(rows)
+        rows.append(df)
+    if not rows:
+        return pd.DataFrame()
+    combined = pd.concat(rows, ignore_index=True)
+    scenario_order_map = {"1A": 0, "2A": 1, "2B": 2, "2C": 3, "3A": 4}
+    combined["_scenario_order"] = combined["Scenario"].map(scenario_order_map)
+    return combined
+
+
+def _paper_load_empirical_sensitivity_results(csv_root: Path) -> pd.DataFrame:
+    """Load application-level sensitivity rows for the empirical level applications."""
+    rows = []
+    base = csv_root / "sensitivity_sweeps"
+    specs = (
+        ("inflation_levels", "Inflation", 0),
+        ("unemployment_levels", "Unemployment", 1),
+    )
+    for source_name, label, order in specs:
+        path = base / source_name / "results_table.csv"
+        if not path.exists():
+            continue
+        df = _paper_read_csv(path)
+        df["Scenario"] = label
+        df["_scenario_order"] = order
+        rows.append(df)
+    if not rows:
+        return pd.DataFrame()
+    return pd.concat(rows, ignore_index=True)
+
+
+def _paper_load_empirical_and_simulation_sensitivity_results(csv_root: Path) -> pd.DataFrame:
+    """Load sensitivity rows for empirical applications and simulation exercises."""
+    empirical = _paper_load_empirical_sensitivity_results(csv_root)
+    simulation = _paper_load_simulation_sensitivity_results(csv_root)
+    frames = []
+    if not empirical.empty:
+        frames.append(empirical)
+    if not simulation.empty:
+        simulation = simulation.copy()
+        simulation["_scenario_order"] = simulation["_scenario_order"].astype(float) + 2
+        frames.append(simulation)
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
+def _paper_plot_sensitivity_by_exercise(
+    plot_df: pd.DataFrame,
+    line_col: str,
+    value_col: str,
+    title: str,
+    ylabel: str,
+    output_dir: Path,
+    stem: str,
+    artifacts: Dict[str, List[str]],
+    method_col: Optional[str] = None,
+    caption: Optional[str] = None,
+    x_axis_label: str = "Simulation exercise",
+) -> None:
+    """Plot exercise-by-exercise relative MSFE sensitivity as side-by-side bars."""
+    if plot_df.empty:
+        return
+    plot_df = plot_df.sort_values(["_scenario_order", line_col]).copy()
+    scenarios = list(dict.fromkeys(plot_df["Scenario"].tolist()))
+    x_pos = np.arange(len(scenarios))
+    fig_width = max(8.4, 1.18 * len(scenarios) + 2.2)
+    fig, ax = plt.subplots(figsize=(fig_width, 4.8))
+
+    covariance_colors = ["#0072B2", "#E69F00", "#009E73", "#CC79A7"]
+    hatches = ["//", "xx", "..", "\\\\"]
+    groups = list(plot_df.groupby(line_col, sort=False, observed=False))
+    n_groups = max(len(groups), 1)
+    bar_width = min(0.24, 0.78 / n_groups)
+    offsets = (np.arange(n_groups) - (n_groups - 1) / 2.0) * bar_width
+    for line_idx, (line_value, sub) in enumerate(groups):
+        sub = sub.set_index("Scenario").reindex(scenarios).reset_index()
+        method_name = None
+        if method_col is not None and method_col in sub.columns:
+            method_values = sub[method_col].dropna().tolist()
+            method_name = method_values[0] if method_values else None
+        if method_name is None:
+            family = "full_gcsr" if "Cov" in line_col or line_value in {"rolling", "ewma", "shrinkage"} else "graph_only"
+            method_name = f"{family}_{line_value}" if line_value in CENTRALITY_ORDER else str(line_value)
+        style = _method_plot_style(method_name)
+        color = style["color"]
+        if line_col == "Centrality":
+            color = CENTRALITY_COLORS.get(str(line_value), color)
+        else:
+            color = covariance_colors[line_idx % len(covariance_colors)]
+        label = (
+            CENTRALITY_DISPLAY_LABELS.get(str(line_value), str(line_value)).title()
+            if line_col == "Centrality"
+            else str(line_value).title()
+        )
+        ax.bar(
+            x_pos + offsets[line_idx],
+            sub[value_col].to_numpy(dtype=float),
+            width=bar_width,
+            color=color,
+            alpha=0.86,
+            edgecolor="#202020",
+            linewidth=0.9,
+            hatch=hatches[line_idx % len(hatches)],
+            label=label,
+        )
+
+    ax.axhline(1.0, color="#111111", linewidth=1.0, linestyle=":")
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(scenarios)
+    ax.set_ylabel(ylabel)
+    ax.set_xlabel(x_axis_label)
+    _apply_publication_legend(ax, ncol=min(3, plot_df[line_col].nunique()), fontsize=10.5, display_labels=False)
+    fig.tight_layout()
+    _paper_save_figure(fig, output_dir, stem, artifacts, caption=caption)
+
+
+def _paper_plot_sensitivity_figures(
+    csv_root: Path,
+    output_dir: Path,
+    artifacts: Dict[str, List[str]],
+) -> None:
+    """Create compact GLIDE and GLIDER sensitivity plots from exported sweeps."""
+    summary_path = csv_root / "sensitivity_summaries" / "simulation_sweep_summary" / "summary.csv"
+    if not summary_path.exists():
+        summary_path = csv_root / "tables" / "simulation_sweep_summary.csv"
+    summary = _paper_read_csv(summary_path)
+    value_col = "Mean_Rel_MSFE" if "Mean_Rel_MSFE" in summary.columns else "Rel_MSFE"
+
+    centrality_order = ["eigenvector", "pagerank", "softmax"]
+    glide = summary[summary["Family"] == "graph_only"].copy()
+    glide = glide[glide["Centrality"].isin(centrality_order)]
+    glide["_order"] = glide["Centrality"].map({name: idx for idx, name in enumerate(centrality_order)})
+    glide = glide.sort_values("_order")
+    _paper_plot_sensitivity_bars(
+        glide,
+        [CENTRALITY_DISPLAY_LABELS.get(c, c).title() for c in glide["Centrality"]],
+        glide[value_col].to_numpy(dtype=float),
+        "GLIDE centrality sensitivity",
+        output_dir,
+        "sensitivity_glide_centralities",
+        artifacts,
+        methods=glide["Method"].tolist(),
+        xlabel="Mean relative MSFE across simulation exercises",
+        note="Mean is over Scenarios 1A, 2A, 2B, 2C, and 3A.",
+        colors=[CENTRALITY_COLORS.get(str(c), "#4D4D4D") for c in glide["Centrality"]],
+        caption=(
+            "GLIDE centrality sensitivity. Bars report mean relative MSFE across "
+            "simulation exercises 1A, 2A, 2B, 2C, and 3A; lower values indicate "
+            "better performance relative to equal weights."
+        ),
+    )
+
+    glider = summary[
+        (summary["Family"] == "full_gcsr")
+        & (summary["Centrality"].isin(centrality_order))
+        & (summary["Cov_Method"] == "shrinkage")
+    ].copy()
+    glider["_order"] = glider["Centrality"].map({name: idx for idx, name in enumerate(centrality_order)})
+    glider = glider.sort_values("_order")
+    _paper_plot_sensitivity_bars(
+        glider,
+        [CENTRALITY_DISPLAY_LABELS.get(c, c).title() for c in glider["Centrality"]],
+        glider[value_col].to_numpy(dtype=float),
+        "GLIDER centrality sensitivity",
+        output_dir,
+        "sensitivity_glider_centralities",
+        artifacts,
+        methods=glider["Method"].tolist(),
+        xlabel="Mean relative MSFE across simulation exercises",
+        note="Mean is over Scenarios 1A, 2A, 2B, 2C, and 3A using shrinkage covariance.",
+        colors=[CENTRALITY_COLORS.get(str(c), "#4D4D4D") for c in glider["Centrality"]],
+        caption=(
+            "GLIDER centrality sensitivity using shrinkage covariance. Bars report "
+            "mean relative MSFE across simulation exercises 1A, 2A, 2B, 2C, and 3A; "
+            "lower values indicate better performance relative to equal weights."
+        ),
+    )
+
+    cov_methods = ["rolling", "ewma", "shrinkage"]
+    cov_df = summary[
+        (summary["Family"] == "full_gcsr")
+        & (summary["Cov_Method"].isin(cov_methods))
+    ].copy()
+    cov_df = cov_df.groupby("Cov_Method", as_index=False)[value_col].mean()
+    cov_df["_order"] = cov_df["Cov_Method"].map({name: idx for idx, name in enumerate(cov_methods)})
+    cov_df = cov_df.sort_values("_order")
+    _paper_plot_sensitivity_bars(
+        cov_df,
+        [str(value).title() for value in cov_df["Cov_Method"]],
+        cov_df[value_col].to_numpy(dtype=float),
+        "GLIDER covariance sensitivity",
+        output_dir,
+        "sensitivity_glider_covariance_methods",
+        artifacts,
+        xlabel="Mean relative MSFE across simulation exercises and centralities",
+        note="Mean is over Scenarios 1A, 2A, 2B, 2C, 3A and the three centralities.",
+        caption=(
+            "GLIDER covariance-estimation sensitivity. Bars report mean relative MSFE "
+            "averaged across simulation exercises 1A, 2A, 2B, 2C, and 3A and across "
+            "the eigenvector, PageRank, and softmax centralities; lower values indicate "
+            "better performance relative to equal weights."
+        ),
+    )
+
+    exercise_df = _paper_load_simulation_sensitivity_results(csv_root)
+    exercise_value_col = "Rel_MSFE"
+    centrality_order_map = {name: idx for idx, name in enumerate(centrality_order)}
+    scenario_order_map = {"1A": 0, "2A": 1, "2B": 2, "2C": 3, "3A": 4}
+
+    glide_exercise = exercise_df[
+        (exercise_df["Family"] == "graph_only")
+        & (exercise_df["Centrality"].isin(centrality_order))
+    ].copy()
+    glide_exercise["_centrality_order"] = glide_exercise["Centrality"].map(centrality_order_map)
+    glide_exercise["_scenario_order"] = glide_exercise["Scenario"].map(scenario_order_map)
+    glide_exercise = glide_exercise.sort_values(["_centrality_order", "_scenario_order"])
+    _paper_plot_sensitivity_by_exercise(
+        glide_exercise,
+        line_col="Centrality",
+        value_col=exercise_value_col,
+        title="GLIDE centrality sensitivity by exercise",
+        ylabel="Relative MSFE",
+        output_dir=output_dir,
+        stem="sensitivity_glide_centralities_by_exercise",
+        artifacts=artifacts,
+        method_col="Method",
+        caption=(
+            "Exercise-by-exercise GLIDE centrality sensitivity. Side-by-side bars show "
+            "relative MSFE for each centrality within each simulation exercise, with the "
+            "dotted reference line marking equal-weight performance."
+        ),
+    )
+
+    all_exercise_df = _paper_load_empirical_and_simulation_sensitivity_results(csv_root)
+    all_order_map = {"Inflation": 0, "Unemployment": 1, "1A": 2, "2A": 3, "2B": 4, "2C": 5, "3A": 6}
+
+    glide_all = all_exercise_df[
+        (all_exercise_df["Family"] == "graph_only")
+        & (all_exercise_df["Centrality"].isin(centrality_order))
+    ].copy()
+    glide_all["_centrality_order"] = glide_all["Centrality"].map(centrality_order_map)
+    glide_all["_scenario_order"] = glide_all["Scenario"].map(all_order_map)
+    glide_all = glide_all.sort_values(["_centrality_order", "_scenario_order"])
+    _paper_plot_sensitivity_by_exercise(
+        glide_all,
+        line_col="Centrality",
+        value_col=exercise_value_col,
+        title="GLIDE centrality sensitivity across applications and exercises",
+        ylabel="Relative MSFE",
+        output_dir=output_dir,
+        stem="sensitivity_glide_centralities_empirical_and_simulation",
+        artifacts=artifacts,
+        method_col="Method",
+        x_axis_label="Application or simulation exercise",
+        caption=(
+            "GLIDE centrality sensitivity across empirical applications and simulation "
+            "exercises. Side-by-side bars show relative MSFE for inflation, unemployment, "
+            "and simulation exercises 1A, 2A, 2B, 2C, and 3A; the dotted reference line "
+            "marks equal-weight performance."
+        ),
+    )
+
+    glider_exercise = exercise_df[
+        (exercise_df["Family"] == "full_gcsr")
+        & (exercise_df["Centrality"].isin(centrality_order))
+        & (exercise_df["Cov_Method"] == "shrinkage")
+    ].copy()
+    glider_exercise["_centrality_order"] = glider_exercise["Centrality"].map(centrality_order_map)
+    glider_exercise["_scenario_order"] = glider_exercise["Scenario"].map(scenario_order_map)
+    glider_exercise = glider_exercise.sort_values(["_centrality_order", "_scenario_order"])
+    _paper_plot_sensitivity_by_exercise(
+        glider_exercise,
+        line_col="Centrality",
+        value_col=exercise_value_col,
+        title="GLIDER centrality sensitivity by exercise",
+        ylabel="Relative MSFE (shrinkage covariance)",
+        output_dir=output_dir,
+        stem="sensitivity_glider_centralities_by_exercise",
+        artifacts=artifacts,
+        method_col="Method",
+        caption=(
+            "Exercise-by-exercise GLIDER centrality sensitivity under shrinkage covariance. "
+            "Side-by-side bars show relative MSFE for each centrality within each simulation "
+            "exercise, with the dotted reference line marking equal-weight performance."
+        ),
+    )
+
+    glider_all = all_exercise_df[
+        (all_exercise_df["Family"] == "full_gcsr")
+        & (all_exercise_df["Centrality"].isin(centrality_order))
+        & (all_exercise_df["Cov_Method"] == "shrinkage")
+    ].copy()
+    glider_all["_centrality_order"] = glider_all["Centrality"].map(centrality_order_map)
+    glider_all["_scenario_order"] = glider_all["Scenario"].map(all_order_map)
+    glider_all = glider_all.sort_values(["_centrality_order", "_scenario_order"])
+    _paper_plot_sensitivity_by_exercise(
+        glider_all,
+        line_col="Centrality",
+        value_col=exercise_value_col,
+        title="GLIDER centrality sensitivity across applications and exercises",
+        ylabel="Relative MSFE (shrinkage covariance)",
+        output_dir=output_dir,
+        stem="sensitivity_glider_centralities_empirical_and_simulation",
+        artifacts=artifacts,
+        method_col="Method",
+        x_axis_label="Application or simulation exercise",
+        caption=(
+            "GLIDER centrality sensitivity under shrinkage covariance across empirical "
+            "applications and simulation exercises. Side-by-side bars show relative MSFE "
+            "for inflation, unemployment, and simulation exercises 1A, 2A, 2B, 2C, and 3A; "
+            "the dotted reference line marks equal-weight performance."
+        ),
+    )
+
+    cov_exercise = exercise_df[
+        (exercise_df["Family"] == "full_gcsr")
+        & (exercise_df["Cov_Method"].isin(cov_methods))
+    ].copy()
+    cov_exercise["_scenario_order"] = cov_exercise["Scenario"].map(scenario_order_map)
+    cov_exercise["Cov_Method"] = pd.Categorical(cov_exercise["Cov_Method"], cov_methods, ordered=True)
+    cov_exercise = (
+        cov_exercise.groupby(["Scenario", "_scenario_order", "Cov_Method"], observed=True, as_index=False)
+        [exercise_value_col]
+        .mean()
+        .sort_values(["Cov_Method", "_scenario_order"])
+    )
+    _paper_plot_sensitivity_by_exercise(
+        cov_exercise,
+        line_col="Cov_Method",
+        value_col=exercise_value_col,
+        title="GLIDER covariance sensitivity by exercise",
+        ylabel="Relative MSFE averaged over centralities",
+        output_dir=output_dir,
+        stem="sensitivity_glider_covariance_methods_by_exercise",
+        artifacts=artifacts,
+        caption=(
+            "Exercise-by-exercise GLIDER covariance sensitivity. Side-by-side bars show "
+            "relative MSFE for each covariance estimator within each simulation exercise, "
+            "averaged over the three centralities; the dotted reference line marks "
+            "equal-weight performance."
+        ),
+    )
+
+    cov_all = all_exercise_df[
+        (all_exercise_df["Family"] == "full_gcsr")
+        & (all_exercise_df["Cov_Method"].isin(cov_methods))
+    ].copy()
+    cov_all["_scenario_order"] = cov_all["Scenario"].map(all_order_map)
+    cov_all["Cov_Method"] = pd.Categorical(cov_all["Cov_Method"], cov_methods, ordered=True)
+    cov_all = (
+        cov_all.groupby(["Scenario", "_scenario_order", "Cov_Method"], observed=True, as_index=False)
+        [exercise_value_col]
+        .mean()
+        .sort_values(["Cov_Method", "_scenario_order"])
+    )
+    _paper_plot_sensitivity_by_exercise(
+        cov_all,
+        line_col="Cov_Method",
+        value_col=exercise_value_col,
+        title="GLIDER covariance sensitivity across applications and exercises",
+        ylabel="Relative MSFE averaged over centralities",
+        output_dir=output_dir,
+        stem="sensitivity_glider_covariance_methods_empirical_and_simulation",
+        artifacts=artifacts,
+        x_axis_label="Application or simulation exercise",
+        caption=(
+            "GLIDER covariance sensitivity across empirical applications and simulation "
+            "exercises. Side-by-side bars show relative MSFE for rolling, EWMA, and "
+            "shrinkage covariance estimators, averaged over the three centralities; the "
+            "dotted reference line marks equal-weight performance."
+        ),
+    )
+
+
+def _paper_empirical_spec_paths(csv_root: Path) -> Tuple[Dict[str, object], ...]:
+    """Return canonical empirical paper-replot paths."""
+    return (
+        {
+            "label": "Inflation",
+            "folder": csv_root / "empirical_studies" / "empirical_inflation_next_quarter",
+            "ylabel": "Inflation",
+        },
+        {
+            "label": "Unemployment",
+            "folder": csv_root / "empirical_studies" / "empirical_unemployment_monthly",
+            "ylabel": "Unemployment",
+        },
+    )
+
+
+def _paper_plot_empirical_headline(
+    csv_root: Path,
+    output_dir: Path,
+    artifacts: Dict[str, List[str]],
+) -> None:
+    """Plot cumulative loss differences for headline empirical comparisons."""
+    specs = _paper_empirical_spec_paths(csv_root)
+    for spec in specs:
+        fig, ax = plt.subplots(figsize=(8.2, 4.8))
+        folder = Path(spec["folder"])
+        losses = _paper_read_csv(folder / "backtest" / "combined_losses.csv")
+        metadata = _paper_read_csv(folder / "oos_period_metadata.csv")
+        x_axis = _paper_date_axis_from_metadata(losses, metadata)
+        methods = [method for method in PAPER_REPLOT_HEADLINE_METHODS if method in losses.columns]
+        methods = order_methods_for_display(methods)
+        reference = losses["equal"].to_numpy(dtype=float)
+        for method in methods:
+            if method == "equal":
+                series = np.zeros(len(losses))
+            else:
+                series = np.cumsum(losses[method].to_numpy(dtype=float) - reference)
+            _paper_plot_line(ax, x_axis, series, method, n_points=len(losses))
+        ax.axhline(0.0, color="#111111", linewidth=1.0, linestyle=":")
+        ax.set_ylabel("Cumulative loss difference")
+        _paper_apply_time_axis(ax, x_axis, x_label=f"{spec['label']} target period")
+        _apply_publication_legend(
+            ax,
+            ncol=2,
+            loc="best",
+            fontsize=10.0,
+            method_order=PAPER_METHOD_ORDER,
+        )
+        fig.autofmt_xdate()
+        fig.tight_layout()
+        slug = str(spec["label"]).lower()
+        _paper_save_figure(
+            fig,
+            output_dir,
+            f"headline_empirical_cumulative_loss_{slug}",
+            artifacts,
+            caption=(
+                f"Headline empirical comparison for {slug}. The figure plots cumulative "
+                "loss differences relative to equal weights for GLIDE softmax, GLIDER "
+                "softmax, RS selection, Hyperedge RS selection, and equal weights; lower "
+                "cumulative loss differences indicate better relative performance."
+            ),
+        )
+
+
+def _paper_plot_empirical_diff_oos_forecasts(
+    csv_root: Path,
+    output_dir: Path,
+    artifacts: Dict[str, List[str]],
+) -> None:
+    """Plot OOS forecasts for differenced empirical inflation and unemployment."""
+    specs = (
+        {
+            "slug": "inflation",
+            "label": "Inflation",
+            "folder": csv_root / "empirical_studies" / "empirical_inflation_next_quarter_diffprev",
+            "ylabel": "Differenced inflation (%)",
+        },
+        {
+            "slug": "unemployment",
+            "label": "Unemployment",
+            "folder": csv_root / "empirical_studies" / "empirical_unemployment_monthly_diffprev",
+            "ylabel": "Differenced unemployment (%)",
+        },
+    )
+    preferred_methods = (
+        "equal",
+        "var_error",
+        "bates_granger_mv",
+        "full_gcsr_softmax",
+        "graph_only_softmax",
+        "rs_selection_v2",
+        "rs_selection",
+        "recent_best",
+    )
+    for spec in specs:
+        path = Path(spec["folder"]) / "oos_forecast_table.csv"
+        if not path.exists():
+            continue
+        df = _paper_read_csv(path)
+        x_axis = pd.to_datetime(df["period_dt"], errors="coerce")
+        if x_axis.isna().any():
+            x_axis = pd.to_datetime(df["TARGET_PERIOD"], errors="coerce")
+        if x_axis.isna().any():
+            x_axis = np.arange(len(df))
+
+        fig, ax = plt.subplots(figsize=(8.8, 4.8))
+        ax.plot(
+            x_axis,
+            df["actual"].to_numpy(dtype=float),
+            color="#111111",
+            linewidth=3.0,
+            label="actual",
+            zorder=5,
+        )
+        methods = [method for method in preferred_methods if method in df.columns]
+        for method in order_methods_for_display(methods):
+            _paper_plot_line(
+                ax,
+                x_axis,
+                df[method].to_numpy(dtype=float),
+                method,
+                n_points=len(df),
+                linewidth=2.1,
+            )
+        ax.axhline(0.0, color="#111111", linewidth=1.0, linestyle=":")
+        ax.set_ylabel(str(spec["ylabel"]))
+        _paper_apply_time_axis(ax, x_axis, x_label=f"{spec['label']} target period")
+        _apply_publication_legend(
+            ax,
+            ncol=2,
+            loc="best",
+            fontsize=9.2,
+            method_order=("actual",) + PAPER_ADAPTABILITY_METHOD_ORDER,
+        )
+        fig.autofmt_xdate()
+        fig.tight_layout()
+        _paper_save_figure(
+            fig,
+            output_dir,
+            f"oos_forecasts_{spec['slug']}_diffprev",
+            artifacts,
+            caption=(
+                f"Out-of-sample forecasts for differenced {str(spec['label']).lower()}. "
+                "The black line is the realized differenced value; colored lines are "
+                "selected forecast-combination methods. Values are measured in percentage "
+                "points."
+            ),
+        )
+
+
+def _paper_plot_rs_pairwise(
+    csv_root: Path,
+    output_dir: Path,
+    artifacts: Dict[str, List[str]],
+) -> None:
+    """Plot direct Hyperedge RS selection vs standard RS selection comparisons."""
+    specs = _paper_empirical_spec_paths(csv_root)
+    fig, axes = plt.subplots(1, 2, figsize=(12.4, 4.5), sharey=False)
+    for ax, spec in zip(axes, specs):
+        folder = Path(spec["folder"])
+        losses = _paper_read_csv(folder / "backtest" / "combined_losses.csv")
+        metadata = _paper_read_csv(folder / "oos_period_metadata.csv")
+        x_axis = _paper_date_axis_from_metadata(losses, metadata)
+        diff = np.cumsum(
+            losses["rs_selection"].to_numpy(dtype=float)
+            - losses["rs_selection_v2"].to_numpy(dtype=float)
+        )
+        ax.plot(
+            x_axis,
+            diff,
+            color=METHOD_FAMILY_COLORS["rs_selection"],
+            linestyle="--",
+            marker="X",
+            markevery=max(len(diff) // 10, 1),
+            linewidth=2.7,
+            label="Hyperedge RS selection minus RS selection",
+        )
+        ax.axhline(0.0, color="#111111", linewidth=1.0, linestyle=":")
+        ax.set_ylabel("Cumulative loss difference" if ax is axes[0] else "")
+        _paper_apply_time_axis(ax, x_axis, x_label=f"{spec['label']} target period")
+        _apply_publication_legend(ax, ncol=1, fontsize=10.0, display_labels=False)
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    fig.subplots_adjust(left=0.11, wspace=0.20)
+    _paper_save_figure(
+        fig,
+        output_dir,
+        "rs_selection_pairwise_empirical",
+        artifacts,
+        caption=(
+            "Direct empirical comparison of Hyperedge RS selection and standard RS selection "
+            "for inflation and unemployment. The plotted series is the cumulative loss of "
+            "Hyperedge RS selection minus the cumulative loss of RS selection, so negative "
+            "values favor Hyperedge RS selection."
+        ),
+    )
+
+
+def _paper_plot_weight_stability(
+    csv_root: Path,
+    output_dir: Path,
+    artifacts: Dict[str, List[str]],
+) -> None:
+    """Plot empirical Herfindahl weight stability for key methods."""
+    methods = ("full_gcsr_softmax", "graph_only_softmax", "rs_selection_v2")
+    specs = (
+        ("inflation", "Inflation", csv_root / "empirical_studies" / "empirical_inflation_next_quarter"),
+        ("unemployment", "Unemployment", csv_root / "empirical_studies" / "empirical_unemployment_monthly"),
+    )
+
+    loaded_specs = []
+    for slug, label, folder in specs:
+        diagnostics = _paper_read_csv(folder / "backtest" / "weight_diagnostics_long.csv")
+        metadata = _paper_read_csv(folder / "oos_period_metadata.csv")
+        loaded_specs.append((slug, label, diagnostics, metadata))
+
+        fig, ax = plt.subplots(figsize=(8.8, 4.7))
+        plotted_methods = order_methods_for_display([m for m in methods if m in diagnostics["method"].unique()])
+        x_axis = None
+        for method in plotted_methods:
+            sub = diagnostics[diagnostics["method"] == method].copy()
+            x_axis = _paper_date_axis_from_metadata(sub, metadata)
+            _paper_plot_line(ax, x_axis, sub["herfindahl"].to_numpy(dtype=float), method, n_points=len(sub))
+        ax.set_ylabel("Herfindahl index")
+        if x_axis is not None:
+            _paper_apply_time_axis(ax, x_axis, x_label="Target Period")
+        _apply_publication_legend(ax, ncol=1, fontsize=10.5, method_order=PAPER_METHOD_ORDER)
+        fig.autofmt_xdate()
+        fig.tight_layout()
+        _paper_save_figure(
+            fig,
+            output_dir,
+            f"weight_stability_{slug}_herfindahl",
+            artifacts,
+            caption=(
+                f"{label} weight stability. The Herfindahl index is plotted over time for "
+                "GLIDER softmax, GLIDE softmax, and RS selection; higher values indicate more "
+                "concentrated forecast-combination weights."
+            ),
+        )
+
+    fig, axes = plt.subplots(1, 2, figsize=(12.8, 4.6), sharey=True)
+    for ax, (_, label, diagnostics, metadata) in zip(axes, loaded_specs):
+        plotted_methods = order_methods_for_display([m for m in methods if m in diagnostics["method"].unique()])
+        x_axis = None
+        for method in plotted_methods:
+            sub = diagnostics[diagnostics["method"] == method].copy()
+            x_axis = _paper_date_axis_from_metadata(sub, metadata)
+            _paper_plot_line(ax, x_axis, sub["herfindahl"].to_numpy(dtype=float), method, n_points=len(sub))
+        ax.set_ylabel("Herfindahl index" if ax is axes[0] else "")
+        if x_axis is not None:
+            _paper_apply_time_axis(ax, x_axis, x_label=f"{label} target period")
+    _apply_publication_legend(axes[0], ncol=1, fontsize=9.5, method_order=PAPER_METHOD_ORDER)
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    fig.subplots_adjust(wspace=0.16)
+    _paper_save_figure(
+        fig,
+        output_dir,
+        "weight_stability_empirical_herfindahl",
+        artifacts,
+        caption=(
+            "Empirical weight stability for inflation and unemployment. The Herfindahl index "
+            "is plotted over time for GLIDER softmax, GLIDE softmax, and RS selection; higher "
+            "values indicate more concentrated forecast-combination weights."
+        ),
+    )
+
+
+def _paper_forecaster_palette(n_models: int) -> List[str]:
+    """Distinct, print-tolerant colors for stackplot forecaster weights."""
+    base = [
+        "#4E79A7",
+        "#F28E2B",
+        "#59A14F",
+        "#B07AA1",
+        "#E15759",
+        "#76B7B2",
+        "#EDC948",
+        "#9C755F",
+        "#BAB0AC",
+        "#A0CBE8",
+        "#FFBE7D",
+        "#8CD17D",
+    ]
+    if n_models <= len(base):
+        return base[:n_models]
+    cmap = plt.get_cmap("tab20")
+    return [base[idx] if idx < len(base) else cmap((idx - len(base)) % 20) for idx in range(n_models)]
+
+
+def _paper_forecaster_hatches(n_models: int) -> List[str]:
+    hatches = ["", "///", "\\\\\\", "xxx", "...", "++", "---", "oo", "\\\\..", "xx//"]
+    return [hatches[idx % len(hatches)] for idx in range(n_models)]
+
+
+def _paper_compact_weight_caption(
+    label: str,
+    model_order: Sequence[object],
+    empirical: bool,
+) -> str:
+    """Caption text for compact A4 forecaster-weight stackplots."""
+    model_labels = [f"$f_{{{idx + 1}}}$" for idx in range(len(model_order))]
+    if empirical:
+        mapping = ", ".join(
+            f"$f_{{{idx + 1}}}$ = {model_id}"
+            for idx, model_id in enumerate(model_order)
+        )
+        mapping_sentence = f" Forecaster labels map to original SPF IDs as follows: {mapping}."
+    else:
+        mapping_sentence = " Forecaster labels follow the simulation model order in the CSV export."
+    return (
+        f"{label} forecast-combination weight paths. Each panel shows stacked forecaster "
+        "weights for one combination method, using the selected paper methods and sized "
+        "for a landscape A4 page. "
+        f"The legend entries {', '.join(model_labels)} denote the underlying forecasters."
+        f"{mapping_sentence}"
+    )
+
+
+def _paper_plot_weight_path_page(
+    weights_path: Path,
+    output_dir: Path,
+    stem: str,
+    label: str,
+    artifacts: Dict[str, List[str]],
+    metadata_path: Optional[Path] = None,
+    empirical: bool = False,
+    x_label: str = "OOS period",
+) -> None:
+    """Create one compact A4 page of stacked forecaster-weight paths."""
+    if not weights_path.exists():
+        return
+    weights = _paper_read_csv(weights_path)
+    required_cols = {"method", "oos_period", "model", "weight"}
+    if weights.empty or not required_cols.issubset(weights.columns):
+        return
+
+    available_methods = set(weights["method"].dropna().astype(str))
+    methods = [method for method in PAPER_WEIGHT_PATH_METHODS if method in available_methods]
+    if not methods:
+        return
+
+    periods = sorted(weights["oos_period"].dropna().unique())
+    period_df = pd.DataFrame({"oos_period": periods})
+    metadata = _paper_read_csv(metadata_path) if metadata_path is not None and metadata_path.exists() else None
+    x_axis = _paper_date_axis_from_metadata(period_df, metadata)
+    model_order = list(dict.fromkeys(weights["model"].tolist()))
+    forecaster_labels = [rf"$f_{{{idx + 1}}}$" for idx in range(len(model_order))]
+    colors = _paper_forecaster_palette(len(model_order))
+    hatches = _paper_forecaster_hatches(len(model_order))
+
+    ncols = 2
+    nrows = int(np.ceil(len(methods) / ncols))
+    fig, axes = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(11.3, 7.9),
+        sharex=True,
+        sharey=True,
+        gridspec_kw={"hspace": 0.20, "wspace": 0.08},
+    )
+    axes_arr = np.atleast_1d(axes).reshape(-1)
+    legend_handles = None
+
+    for idx, method in enumerate(methods):
+        ax = axes_arr[idx]
+        sub = weights[weights["method"] == method].copy()
+        pivot = (
+            sub.pivot_table(
+                index="oos_period",
+                columns="model",
+                values="weight",
+                aggfunc="mean",
+            )
+            .reindex(index=periods, columns=model_order)
+            .fillna(0.0)
+        )
+        values = np.clip(pivot.to_numpy(dtype=float), 0.0, 1.0)
+        polys = ax.stackplot(
+            x_axis,
+            values.T,
+            labels=forecaster_labels,
+            colors=colors,
+            alpha=0.84,
+            linewidth=0.35,
+            edgecolor="#FFFFFF",
+        )
+        for poly, hatch in zip(polys, hatches):
+            if hatch:
+                poly.set_hatch(hatch)
+            poly.set_edgecolor("#FFFFFF")
+            poly.set_linewidth(0.35)
+        if legend_handles is None:
+            legend_handles = polys
+
+        ax.text(
+            0.012,
+            0.90,
+            method_display_label(method),
+            transform=ax.transAxes,
+            ha="left",
+            va="top",
+            fontsize=15.0,
+            fontweight="medium",
+            bbox={
+                "boxstyle": "round,pad=0.18",
+                "facecolor": "white",
+                "edgecolor": "#B0B0B0",
+                "linewidth": 0.5,
+                "alpha": 0.88,
+            },
+        )
+        ax.set_ylim(0.0, 1.0)
+        ax.set_yticks([0.0, 0.5, 1.0])
+        ax.tick_params(axis="both", labelsize=13.5)
+        ax.grid(True, axis="y", alpha=0.18)
+        ax.grid(True, axis="x", alpha=0.10)
+
+        if idx % ncols != 0:
+            ax.tick_params(axis="y", labelleft=False)
+        if idx < len(methods) - ncols:
+            ax.tick_params(axis="x", labelbottom=False)
+
+    for ax in axes_arr[len(methods):]:
+        ax.axis("off")
+
+    bottom_axes = axes_arr[max(0, len(methods) - ncols):len(methods)]
+    for ax in bottom_axes:
+        _paper_apply_time_axis(ax, x_axis, x_label="")
+    fig.text(0.545, 0.115, x_label, va="center", ha="center", fontsize=18.0)
+    if _is_datetime_axis(x_axis):
+        fig.autofmt_xdate(rotation=0)
+
+    fig.text(0.035, 0.52, "Weight", rotation=90, va="center", ha="center", fontsize=18.5)
+    if legend_handles is not None:
+        fig.legend(
+            handles=legend_handles,
+            labels=forecaster_labels,
+            loc="lower center",
+            ncol=min(len(forecaster_labels), 8),
+            fontsize=13.6,
+            frameon=True,
+            framealpha=0.95,
+            facecolor="white",
+            edgecolor="#B0B0B0",
+            bbox_to_anchor=(0.5, 0.018),
+            columnspacing=0.9,
+            handlelength=1.5,
+        )
+    fig.subplots_adjust(left=0.105, right=0.985, top=0.985, bottom=0.20, hspace=0.20, wspace=0.08)
+    _paper_save_figure(
+        fig,
+        output_dir,
+        stem,
+        artifacts,
+        caption=_paper_compact_weight_caption(label, model_order, empirical=empirical),
+    )
+
+
+def _paper_plot_weight_paths_a4(
+    csv_root: Path,
+    output_dir: Path,
+    artifacts: Dict[str, List[str]],
+) -> None:
+    """Create compact A4 weight-path figures for empirical and simulation examples."""
+    empirical_specs = (
+        (
+            "weights_empirical_inflation",
+            "Inflation",
+            csv_root / "empirical_studies" / "empirical_inflation_next_quarter" / "backtest" / "weights_long.csv",
+            csv_root / "empirical_studies" / "empirical_inflation_next_quarter" / "oos_period_metadata.csv",
+        ),
+        (
+            "weights_empirical_unemployment",
+            "Unemployment",
+            csv_root / "empirical_studies" / "empirical_unemployment_monthly" / "backtest" / "weights_long.csv",
+            csv_root / "empirical_studies" / "empirical_unemployment_monthly" / "oos_period_metadata.csv",
+        ),
+        (
+            "weights_empirical_inflation_diffprev",
+            "Differenced inflation",
+            csv_root / "empirical_studies" / "empirical_inflation_next_quarter_diffprev" / "backtest" / "weights_long.csv",
+            csv_root / "empirical_studies" / "empirical_inflation_next_quarter_diffprev" / "oos_period_metadata.csv",
+        ),
+        (
+            "weights_empirical_unemployment_diffprev",
+            "Differenced unemployment",
+            csv_root / "empirical_studies" / "empirical_unemployment_monthly_diffprev" / "backtest" / "weights_long.csv",
+            csv_root / "empirical_studies" / "empirical_unemployment_monthly_diffprev" / "oos_period_metadata.csv",
+        ),
+    )
+    for stem, label, weights_path, metadata_path in empirical_specs:
+        _paper_plot_weight_path_page(
+            weights_path=weights_path,
+            output_dir=output_dir,
+            stem=stem,
+            label=label,
+            artifacts=artifacts,
+            metadata_path=metadata_path,
+            empirical=True,
+            x_label="Target period",
+        )
+
+    simulation_specs = (
+        ("weights_simulation_1A", "Simulation Scenario 1A", csv_root / "backtests" / "mcs_backtest_1A" / "weights_long.csv"),
+        ("weights_simulation_2A", "Simulation Scenario 2A", csv_root / "backtests" / "res_2A" / "weights_long.csv"),
+        ("weights_simulation_2B", "Simulation Scenario 2B", csv_root / "backtests" / "res_2B" / "weights_long.csv"),
+        ("weights_simulation_2C", "Simulation Scenario 2C", csv_root / "backtests" / "mcs_backtest_2C" / "weights_long.csv"),
+        ("weights_simulation_3A", "Simulation Scenario 3A", csv_root / "backtests" / "mcs_backtest_4A" / "weights_long.csv"),
+    )
+    for stem, label, weights_path in simulation_specs:
+        _paper_plot_weight_path_page(
+            weights_path=weights_path,
+            output_dir=output_dir,
+            stem=stem,
+            label=label,
+            artifacts=artifacts,
+            empirical=False,
+            x_label="OOS period",
+        )
+
+
+def _paper_plot_adaptability_figures(
+    csv_root: Path,
+    output_dir: Path,
+    artifacts: Dict[str, List[str]],
+) -> None:
+    """Create adaptability integrated-excess-risk and half-life figures."""
+    def _full_horizon_event_indices(profiles: pd.DataFrame, value_col: str) -> Optional[np.ndarray]:
+        """Return events with finite values at every plotted horizon."""
+        required = {"event_index", "horizon", value_col}
+        if profiles.empty or not required.issubset(profiles.columns):
+            return None
+        profile_values = profiles[["event_index", "horizon", value_col]].copy()
+        profile_values[value_col] = pd.to_numeric(profile_values[value_col], errors="coerce")
+        horizon_count = int(profile_values["horizon"].nunique())
+        finite = profile_values[profile_values[value_col].notna()]
+        counts = finite.groupby("event_index")["horizon"].nunique()
+        return counts[counts == horizon_count].index.to_numpy()
+
+    def _filter_to_events(df: pd.DataFrame, event_indices: Optional[np.ndarray]) -> pd.DataFrame:
+        """Filter an event-level or profile dataframe to a retained event set."""
+        if event_indices is None or "event_index" not in df.columns:
+            return df.copy()
+        return df[df["event_index"].isin(event_indices)].copy()
+
+    for scenario_key in ("2A", "2B"):
+        base = csv_root / "adaptability" / f"adapt_{scenario_key}"
+        profiles_raw = _paper_read_csv(base / "excess_risk_profiles_long.csv")
+        summary = _paper_read_csv(base / "summary_table.csv")
+        is_multi = "Replications" in summary.columns
+        original_event_count = (
+            int(profiles_raw["event_index"].nunique())
+            if "event_index" in profiles_raw.columns
+            else int(summary["Events"].max())
+        )
+        full_event_indices = (
+            _full_horizon_event_indices(profiles_raw, "excess_risk")
+            if scenario_key == "2B"
+            else None
+        )
+        profiles = _filter_to_events(profiles_raw, full_event_indices)
+        retained_event_count = (
+            int(profiles["event_index"].nunique())
+            if "event_index" in profiles.columns
+            else original_event_count
+        )
+        full_window_phrase = ""
+        if scenario_key == "2B" and full_event_indices is not None:
+            full_window_phrase = (
+                f" using {retained_event_count} full-window events "
+                f"out of {original_event_count} detected switch events"
+            )
+        if is_multi and scenario_key == "2A":
+            replications = int(summary["Replications"].max())
+            break_time = int(summary["Bias_Break_Time"].max())
+            event_description = (
+                f"the known Scenario 2A bias break at t={break_time}, averaged over "
+                f"{replications} simulation replications"
+            )
+            x_event_label = "Periods since bias break"
+            half_life_event_phrase = "after the bias break"
+        elif is_multi:
+            replications = int(summary["Replications"].max())
+            event_description = (
+                "full-window latent oracle switches, averaged over "
+                f"{replications} simulation replications"
+                if scenario_key == "2B" and full_event_indices is not None
+                else (
+                    "latent oracle switches, averaged over "
+                    f"{replications} simulation replications"
+                )
+            )
+            x_event_label = "Periods since latent oracle switch"
+            half_life_event_phrase = "after a latent oracle switch"
+        else:
+            event_description = "latent oracle switches"
+            x_event_label = "Periods since latent oracle switch"
+            half_life_event_phrase = "after a latent oracle switch"
+        methods = [
+            method
+            for method in PAPER_ADAPTABILITY_METHOD_ORDER
+            if method in set(profiles["method"]) and method in set(summary["Method"])
+        ]
+
+        fig, ax = plt.subplots(figsize=(8.2, 5.2))
+        for method in methods:
+            sub = profiles[profiles["method"] == method]
+            profile = sub.groupby("horizon", as_index=False)["excess_risk"].mean()
+            profile = profile.sort_values("horizon")
+            _paper_plot_line(
+                ax,
+                profile["horizon"].to_numpy(),
+                profile["excess_risk"].to_numpy(dtype=float),
+                method,
+                n_points=len(profile),
+                linewidth=2.2,
+            )
+        ax.set_xlabel(x_event_label)
+        ax.set_ylabel("Mean excess latent risk")
+        _apply_publication_legend(
+            ax,
+            ncol=3,
+            loc="lower center",
+            bbox_to_anchor=(0.5, 1.01),
+            fontsize=12,
+            method_order=PAPER_ADAPTABILITY_METHOD_ORDER,
+        )
+        fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.84))
+        _paper_save_figure(
+            fig,
+            output_dir,
+            f"adaptability_excess_risk_{scenario_key}",
+            artifacts,
+            caption=(
+                f"Scenario {scenario_key} excess latent-risk profile. Lines show the "
+                f"non-cumulative mean excess latent risk after {event_description}"
+                f"{full_window_phrase}; lower values indicate closer tracking of the "
+                "latent oracle at that event horizon."
+            ),
+        )
+
+        fig, ax = plt.subplots(figsize=(8.2, 5.2))
+        for method in methods:
+            sub = profiles[profiles["method"] == method]
+            profile = sub.groupby("horizon", as_index=False)["excess_risk"].mean()
+            profile = profile.sort_values("horizon")
+            integrated = profile["excess_risk"].fillna(0.0).cumsum().to_numpy(dtype=float)
+            _paper_plot_line(
+                ax,
+                profile["horizon"].to_numpy(),
+                integrated,
+                method,
+                n_points=len(profile),
+                linewidth=2.2,
+            )
+        ax.set_xlabel(x_event_label)
+        ax.set_ylabel("Cumulative mean excess latent risk")
+        _apply_publication_legend(
+            ax,
+            ncol=2,
+            loc="best",
+            fontsize=8.8,
+            method_order=PAPER_ADAPTABILITY_METHOD_ORDER,
+        )
+        fig.tight_layout()
+        _paper_save_figure(
+            fig,
+            output_dir,
+            f"adaptability_ier_{scenario_key}",
+            artifacts,
+            caption=(
+                f"Scenario {scenario_key} adaptability profile. Lines show cumulative "
+                f"sums of mean excess latent risk after {event_description}"
+                f"{full_window_phrase} for the ordered set of benchmark and combination "
+                "methods. These are area summaries, so near-linear curves indicate nearly "
+                "constant mean horizon-level excess risk rather than a linear recovery path; "
+                "lower values indicate lower accumulated adaptation cost."
+            ),
+        )
+
+        summary = summary[summary["Method"].isin(methods)].copy()
+        if scenario_key == "2B" and full_event_indices is not None:
+            half_lives = _filter_to_events(_paper_read_csv(base / "half_lives_long.csv"), full_event_indices)
+            for method in methods:
+                method_half = pd.to_numeric(
+                    half_lives.loc[half_lives["method"] == method, "half_life"],
+                    errors="coerce",
+                ).to_numpy(dtype=float)
+                method_mask = summary["Method"] == method
+                summary.loc[method_mask, "Events"] = retained_event_count
+                summary.loc[method_mask, "Mean_Half_Life"] = _safe_nanmean(method_half)
+                summary.loc[method_mask, "Median_Half_Life"] = _safe_nanmedian(method_half)
+                if "Half_Life_Reached_Frac" in summary.columns:
+                    summary.loc[method_mask, "Half_Life_Reached_Frac"] = float(np.mean(np.isfinite(method_half)))
+        if scenario_key == "2B":
+            equal_mask = summary["Method"] == "equal"
+            summary.loc[equal_mask, ["Mean_Half_Life", "Median_Half_Life"]] = np.nan
+            if "Half_Life_Reached_Frac" in summary.columns:
+                summary.loc[equal_mask, "Half_Life_Reached_Frac"] = 0.0
+        summary["_order"] = summary["Method"].map({method: idx for idx, method in enumerate(methods)})
+        summary = summary.sort_values("_order")
+        values = summary["Mean_Half_Life"].to_numpy(dtype=float)
+        finite_values = values[np.isfinite(values)]
+        has_not_reached = bool(np.any(~np.isfinite(values)))
+        event_horizon = int(profiles["horizon"].max()) if "horizon" in profiles.columns and not profiles.empty else 0
+        event_count = retained_event_count if scenario_key == "2B" else (
+            int(profiles["event_index"].nunique()) if "event_index" in profiles.columns else int(summary["Events"].max())
+        )
+        finite_max = float(np.nanmax(finite_values)) if finite_values.size else 0.0
+        x_limit = 40.0
+        label_offset = max(min(finite_max * 0.06, 1.8), 1.2)
+        not_reached_x = x_limit - 2.8
+
+        fig, ax = plt.subplots(figsize=(7.8, 5.3))
+        y_pos = np.arange(len(summary))
+        for ypos, method, value in zip(y_pos, summary["Method"], values):
+            style = _method_plot_style(method)
+            if np.isfinite(value):
+                bar_value = min(float(value), x_limit)
+                bar = ax.barh(
+                    ypos,
+                    bar_value,
+                    height=0.66,
+                    color=style["color"],
+                    edgecolor="#2F2F2F",
+                    linewidth=0.8,
+                    alpha=0.88,
+                )
+                if style["hatch"]:
+                    bar.patches[0].set_hatch(style["hatch"])
+                ax.plot(
+                    bar_value,
+                    ypos,
+                    marker=style["marker"],
+                    markersize=8.0,
+                    markerfacecolor="white",
+                    markeredgewidth=1.4,
+                    color=style["color"],
+                )
+                text_x = min(float(value) + label_offset, x_limit + 0.8)
+                ax.text(
+                    text_x,
+                    ypos,
+                    f"{value:.1f}",
+                    va="center",
+                    fontsize=9.8,
+                    clip_on=False,
+                )
+            else:
+                ax.text(
+                    not_reached_x,
+                    ypos,
+                    "not reached",
+                    va="center",
+                    fontsize=9.2,
+                    color="#5C5C5C",
+                )
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels([method_display_label(method) for method in summary["Method"]])
+        ax.invert_yaxis()
+        ax.set_ylim(len(summary) - 0.05, -0.85)
+        ax.set_xlabel("Mean half-life in periods")
+        ax.axvline(0.0, color="#111111", linewidth=0.9)
+        if event_horizon and has_not_reached and event_horizon <= x_limit:
+            ax.axvline(event_horizon, color="#777777", linewidth=0.9, linestyle=":")
+        ax.set_xlim(0.0, x_limit)
+        ax.grid(True, axis="x", alpha=0.22)
+        fig.tight_layout()
+        _paper_save_figure(
+            fig,
+            output_dir,
+            f"adaptability_half_life_{scenario_key}",
+            artifacts,
+            caption=(
+                f"Scenario {scenario_key} adaptability half-life. Bars report, "
+                + (
+                    f"across {event_count} known bias-break replications, "
+                    if is_multi and scenario_key == "2A"
+                    else (
+                        f"averaged over {event_count} full-window latent-oracle switch events, "
+                        if scenario_key == "2B" and full_event_indices is not None
+                        else f"averaged over {event_count} latent-oracle switch events, "
+                    )
+                    if is_multi
+                    else (
+                        f"averaging over {event_count} detected latent-oracle switch event"
+                        f"{'s' if event_count != 1 else ''}, "
+                    )
+                )
+                + "the number of periods required for each method's smoothed excess-risk gap to "
+                f"fall by half {half_life_event_phrase}; lower values indicate faster "
+                "adaptation. Finite bars are averaged over events that reach this threshold "
+                "within the event window. The x-axis is capped at 40 periods; labels printed "
+                "to the right of capped bars report the uncapped mean. Entries marked not "
+                "reached are undefined within the event window and should not be interpreted "
+                "as zero."
+            ),
+        )
+
+    snippet_path = output_dir / "adaptability_side_by_side_snippet.tex"
+    snippet = "\n".join([
+        "% Generated by functionality.generate_paper_replots().",
+        "\\begin{figure}[!htbp]",
+        "\\centering",
+        "\\begin{minipage}{0.49\\textwidth}",
+        "\\centering",
+        "\\includegraphics[width=\\linewidth]{Empirical_Data/empirical_outputs/paper_replots/adaptability_ier_2A.pdf}",
+        "\\end{minipage}\\hfill",
+        "\\begin{minipage}{0.49\\textwidth}",
+        "\\centering",
+        "\\includegraphics[width=\\linewidth]{Empirical_Data/empirical_outputs/paper_replots/adaptability_half_life_2A.pdf}",
+        "\\end{minipage}",
+        "\\vspace{0.5em}",
+        "\\begin{minipage}{0.49\\textwidth}",
+        "\\centering",
+        "\\includegraphics[width=\\linewidth]{Empirical_Data/empirical_outputs/paper_replots/adaptability_ier_2B.pdf}",
+        "\\end{minipage}\\hfill",
+        "\\begin{minipage}{0.49\\textwidth}",
+        "\\centering",
+        "\\includegraphics[width=\\linewidth]{Empirical_Data/empirical_outputs/paper_replots/adaptability_half_life_2B.pdf}",
+        "\\end{minipage}",
+        "\\caption{Adaptability diagnostics for Scenarios 2A and 2B. Scenario 2A is measured at the known bias break across multiple simulation replications; Scenario 2B is measured on full-window latent-oracle switch events across multiple simulation replications. Left panels show cumulative sums of mean excess latent risk, so near-linear curves reflect nearly constant horizon-level excess risk rather than a linear recovery path; right panels show mean half-life, where lower values indicate faster adaptation and not-reached entries are undefined within the event window rather than zero.}",
+        "\\label{fig:adaptability-side-by-side}",
+        "\\end{figure}",
+        "",
+    ])
+    snippet_path.write_text(snippet)
+    artifacts["adaptability_side_by_side_snippet"] = [str(snippet_path)]
+
+
+def _paper_export_slug(value: object) -> str:
+    """Create the same simple filesystem slug used by the notebook CSV export cell."""
+    text = str(value)
+    chars = [ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in text]
+    slug = "".join(chars).strip("_")
+    while "__" in slug:
+        slug = slug.replace("__", "_")
+    return slug or "unnamed"
+
+
+def _paper_model_names(count: int, prefix: str = "model") -> List[str]:
+    return [f"{prefix}_{idx + 1}" for idx in range(int(count))]
+
+
+def _paper_wide_df(
+    matrix: np.ndarray,
+    index_values: Sequence[object],
+    index_name: str,
+    columns: Sequence[str],
+) -> pd.DataFrame:
+    df = pd.DataFrame(np.asarray(matrix), columns=list(columns))
+    df.insert(0, index_name, index_values)
+    return df
+
+
+def _paper_dict_to_wide_df(
+    values_dict: Dict[str, Sequence[float]],
+    index_values: Sequence[object],
+    index_name: str,
+) -> pd.DataFrame:
+    df = pd.DataFrame({name: np.asarray(values) for name, values in values_dict.items()})
+    df.insert(0, index_name, index_values)
+    return df
+
+
+def _paper_profile_dict_to_long(
+    profile_dict: Dict[str, np.ndarray],
+    event_times: Sequence[int],
+    value_name: str,
+) -> pd.DataFrame:
+    rows = []
+    for method, values in profile_dict.items():
+        arr = np.asarray(values)
+        if arr.ndim == 1:
+            for event_idx, value in enumerate(arr):
+                rows.append({
+                    "method": method,
+                    "event_index": event_idx,
+                    "event_time": event_times[event_idx] if event_idx < len(event_times) else np.nan,
+                    value_name: value,
+                })
+        elif arr.ndim == 2:
+            for event_idx in range(arr.shape[0]):
+                for horizon in range(arr.shape[1]):
+                    rows.append({
+                        "method": method,
+                        "event_index": event_idx,
+                        "event_time": event_times[event_idx] if event_idx < len(event_times) else np.nan,
+                        "horizon": horizon,
+                        value_name: arr[event_idx, horizon],
+                    })
+    return pd.DataFrame(rows)
+
+
+def _paper_write_csv(df: pd.DataFrame, path: Path, written_files: List[str], index: bool = False) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(path, index=index)
+    written_files.append(str(path))
+
+
+def _paper_export_simulation_data(
+    name: str,
+    data: SimulationData,
+    export_root: Path,
+    written_files: List[str],
+    model_names: Optional[Sequence[str]] = None,
+) -> None:
+    """Export raw simulation paths for reproducible paper replots."""
+    base_dir = export_root / "simulation_data" / _paper_export_slug(name)
+    model_names = list(model_names or _paper_model_names(data.forecasts.shape[1]))
+    t_index = np.arange(len(data.y))
+    _paper_write_csv(
+        pd.DataFrame({
+            "t": t_index,
+            "actual": np.asarray(data.y),
+            "common_shock": np.asarray(data.common_shock),
+        }),
+        base_dir / "target_and_common_shock.csv",
+        written_files,
+    )
+    _paper_write_csv(_paper_wide_df(data.forecasts, t_index, "t", model_names), base_dir / "forecasts.csv", written_files)
+    _paper_write_csv(_paper_wide_df(data.errors, t_index, "t", model_names), base_dir / "forecast_errors.csv", written_files)
+    _paper_write_csv(_paper_wide_df(data.losses, t_index, "t", model_names), base_dir / "losses.csv", written_files)
+    if getattr(data, "bias_paths", None) is not None:
+        _paper_write_csv(_paper_wide_df(data.bias_paths, t_index, "t", model_names), base_dir / "bias_paths.csv", written_files)
+    if getattr(data, "sigma_paths", None) is not None:
+        _paper_write_csv(_paper_wide_df(data.sigma_paths, t_index, "t", model_names), base_dir / "sigma_paths.csv", written_files)
+
+
+def _paper_export_backtest_result(
+    name: str,
+    res: BacktestResult,
+    export_root: Path,
+    written_files: List[str],
+    model_names: Optional[Sequence[str]] = None,
+) -> None:
+    """Export the backtest CSVs consumed by the paper-replot layer."""
+    base_dir = export_root / "backtests" / _paper_export_slug(name)
+    oos = np.asarray(res.oos_periods)
+    model_names = list(model_names or _paper_model_names(res.forecasts_oos.shape[1]))
+
+    _paper_write_csv(pd.DataFrame({"oos_period": oos, "actual": np.asarray(res.y_oos)}), base_dir / "y_oos.csv", written_files)
+    _paper_write_csv(_paper_wide_df(res.forecasts_oos, oos, "oos_period", model_names), base_dir / "raw_model_forecasts_oos.csv", written_files)
+    raw_errors = np.asarray(res.y_oos)[:, None] - np.asarray(res.forecasts_oos)
+    _paper_write_csv(_paper_wide_df(raw_errors, oos, "oos_period", model_names), base_dir / "raw_model_forecast_errors_oos.csv", written_files)
+    _paper_write_csv(_paper_dict_to_wide_df(res.combined_forecasts, oos, "oos_period"), base_dir / "combined_forecasts.csv", written_files)
+    _paper_write_csv(_paper_dict_to_wide_df(res.combined_losses, oos, "oos_period"), base_dir / "combined_losses.csv", written_files)
+    _paper_write_csv(compute_performance_table(res), base_dir / "performance_table.csv", written_files)
+
+    if "equal" in res.combined_losses:
+        reference_loss = np.asarray(res.combined_losses["equal"], dtype=float)
+        loss_diff = {"oos_period": oos}
+        cumulative_loss_diff = {"oos_period": oos}
+        for method, values in res.combined_losses.items():
+            if method == "equal":
+                continue
+            period_diff = np.asarray(values, dtype=float) - reference_loss
+            loss_diff[method] = period_diff
+            cumulative_loss_diff[method] = np.cumsum(period_diff)
+        _paper_write_csv(pd.DataFrame(loss_diff), base_dir / "loss_differentials_vs_equal.csv", written_files)
+        _paper_write_csv(pd.DataFrame(cumulative_loss_diff), base_dir / "cumulative_loss_differentials_vs_equal.csv", written_files)
+
+    weight_rows = []
+    diag_rows = []
+    for method, weights in res.weights.items():
+        w = np.asarray(weights)
+        _paper_write_csv(_paper_wide_df(w, oos, "oos_period", model_names), base_dir / f"weights__{_paper_export_slug(method)}.csv", written_files)
+        herf = compute_herfindahl(w)
+        eff_n = compute_effective_n(w)
+        turnover = compute_turnover(w)
+        for t_idx, oos_t in enumerate(oos):
+            diag_rows.append({
+                "method": method,
+                "oos_period": oos_t,
+                "herfindahl": herf[t_idx],
+                "effective_n": eff_n[t_idx],
+                "turnover": np.nan if t_idx == 0 else turnover[t_idx - 1],
+            })
+            for model_idx, model_name in enumerate(model_names):
+                weight_rows.append({
+                    "method": method,
+                    "oos_period": oos_t,
+                    "model": model_name,
+                    "weight": w[t_idx, model_idx],
+                })
+    if weight_rows:
+        _paper_write_csv(pd.DataFrame(weight_rows), base_dir / "weights_long.csv", written_files)
+    if diag_rows:
+        _paper_write_csv(pd.DataFrame(diag_rows), base_dir / "weight_diagnostics_long.csv", written_files)
+
+
+def _paper_export_sensitivity_sweep(
+    sweep: SensitivitySweepResult,
+    export_root: Path,
+    written_files: List[str],
+) -> None:
+    base_dir = export_root / "sensitivity_sweeps" / _paper_export_slug(sweep.source_name)
+    _paper_write_csv(sweep.results_table, base_dir / "results_table.csv", written_files)
+    _paper_write_csv(sweep.graph_only_table, base_dir / "graph_only_table.csv", written_files)
+    _paper_write_csv(sweep.full_gcsr_table, base_dir / "full_gcsr_table.csv", written_files)
+    _paper_write_csv(sweep.full_gcsr_pivot, base_dir / "full_gcsr_pivot.csv", written_files, index=True)
+    _paper_write_csv(sweep.combined_losses, base_dir / "combined_losses.csv", written_files)
+
+
+def _paper_export_adaptability_result(
+    name: str,
+    adapt_result: AdaptabilityResult,
+    export_root: Path,
+    written_files: List[str],
+) -> None:
+    base_dir = export_root / "adaptability" / _paper_export_slug(name)
+    _paper_write_csv(adapt_result.summary_table, base_dir / "summary_table.csv", written_files)
+    _paper_write_csv(
+        pd.DataFrame({"event_index": np.arange(len(adapt_result.event_times)), "event_time": adapt_result.event_times}),
+        base_dir / "event_times.csv",
+        written_files,
+    )
+    _paper_write_csv(
+        pd.DataFrame({"t": np.arange(len(adapt_result.oracle_models)), "oracle_model": adapt_result.oracle_models}),
+        base_dir / "oracle_models.csv",
+        written_files,
+    )
+    _paper_write_csv(
+        _paper_wide_df(
+            adapt_result.oracle_portfolio_weights,
+            np.arange(len(adapt_result.oracle_portfolio_weights)),
+            "t",
+            _paper_model_names(adapt_result.oracle_portfolio_weights.shape[1]),
+        ),
+        base_dir / "oracle_portfolio_weights.csv",
+        written_files,
+    )
+    _paper_write_csv(_paper_profile_dict_to_long(adapt_result.oracle_weight_profiles, adapt_result.event_times, "oracle_weight_profile"), base_dir / "oracle_weight_profiles_long.csv", written_files)
+    _paper_write_csv(_paper_profile_dict_to_long(adapt_result.oracle_gap_profiles, adapt_result.event_times, "oracle_gap_profile"), base_dir / "oracle_gap_profiles_long.csv", written_files)
+    _paper_write_csv(_paper_profile_dict_to_long(adapt_result.latent_risk_profiles, adapt_result.event_times, "latent_risk"), base_dir / "latent_risk_profiles_long.csv", written_files)
+    _paper_write_csv(_paper_profile_dict_to_long(adapt_result.excess_risk_profiles, adapt_result.event_times, "excess_risk"), base_dir / "excess_risk_profiles_long.csv", written_files)
+    _paper_write_csv(_paper_profile_dict_to_long(adapt_result.relative_gap_profiles, adapt_result.event_times, "relative_gap"), base_dir / "relative_gap_profiles_long.csv", written_files)
+    _paper_write_csv(_paper_profile_dict_to_long(adapt_result.half_lives, adapt_result.event_times, "half_life"), base_dir / "half_lives_long.csv", written_files)
+    _paper_write_csv(_paper_profile_dict_to_long(adapt_result.recovery_delays, adapt_result.event_times, "recovery_delay"), base_dir / "recovery_delays_long.csv", written_files)
+
+
+def regenerate_2a_multi_sim_adaptability_csv_export(
+    csv_root: Union[str, Path] = "Empirical_Data/empirical_outputs/replot_csv_exports",
+    M: int = 8,
+    T: int = 400,
+    T0: int = 200,
+    seed: int = 42,
+    replications: int = 50,
+    horizon: int = 80,
+    smooth_window: int = 5,
+    target_oracle_weight: float = 0.60,
+    bt_cfg: Optional[BacktestConfig] = None,
+    verbose: bool = True,
+) -> List[str]:
+    """
+    Regenerate Scenario 2A adaptability CSVs using many independent bias breaks.
+
+    Scenario 2A has a known structural break in the bias vector. For this
+    diagnostic we therefore use the known break date as the event in every
+    replication, rather than requiring the latent best single forecaster to
+    change identity.
+    """
+    csv_root = Path(csv_root)
+    base_dir = csv_root / "adaptability" / "adapt_2A"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    written_files: List[str] = []
+
+    if replications <= 0:
+        raise ValueError("replications must be positive for the 2A adaptability rerun.")
+    if T0 >= T:
+        raise ValueError("T0 must be smaller than T for the 2A adaptability rerun.")
+
+    bt_cfg = bt_cfg if bt_cfg is not None else _paper_base_backtest_config()
+    methods = list(PAPER_ADAPTABILITY_METHOD_ORDER)
+    model_names = _paper_model_names(M)
+
+    event_rows = []
+    oracle_model_rows = []
+    oracle_weight_rows = []
+    profile_rows = {
+        "oracle_weight_profile": [],
+        "oracle_gap_profile": [],
+        "latent_risk": [],
+        "excess_risk": [],
+        "relative_gap": [],
+    }
+    half_life_rows = []
+    recovery_rows = []
+
+    for rep_idx in range(int(replications)):
+        rep_seed = int(seed + rep_idx)
+        cfg = scenario_2A(
+            M=M,
+            T=T,
+            T0=T0,
+            seed=rep_seed,
+            break_frac=float(T0) / float(T),
+        )
+        if cfg.bias_break_time != T0:
+            raise ValueError(
+                f"Scenario 2A break time is {cfg.bias_break_time}, expected T0={T0}."
+            )
+
+        if verbose:
+            print(
+                f"Scenario 2A adaptability replication {rep_idx + 1}/{replications} "
+                f"(seed={rep_seed}, break={cfg.bias_break_time})..."
+            )
+
+        data = generate_scenario(cfg)
+        res = run_backtest(data, bt_cfg, verbose=False)
+        adapt = compute_adaptability_diagnostics(
+            data,
+            res,
+            methods=methods,
+            horizon=horizon,
+            smooth_window=smooth_window,
+            target_oracle_weight=target_oracle_weight,
+            event_times=[cfg.bias_break_time],
+        )
+
+        oracle = compute_latent_oracle_indices(data)
+        event_global = rep_idx
+        event_time = int(cfg.bias_break_time)
+        oracle_pre = int(oracle[event_time - 1]) if event_time > 0 else int(oracle[event_time])
+        oracle_post = int(oracle[event_time])
+        event_rows.append({
+            "event_index": event_global,
+            "replication": rep_idx,
+            "seed": rep_seed,
+            "event_time": event_time,
+            "bias_break_time": int(cfg.bias_break_time),
+            "oracle_pre": oracle_pre,
+            "oracle_post": oracle_post,
+            "oracle_single_changed": bool(oracle_pre != oracle_post),
+        })
+        oracle_model_rows.append({
+            "event_index": event_global,
+            "replication": rep_idx,
+            "seed": rep_seed,
+            "event_time": event_time,
+            "oracle_model": oracle_post,
+        })
+
+        max_use_len = min(int(horizon), T - event_time)
+        for h in range(max_use_len):
+            row = {
+                "event_index": event_global,
+                "replication": rep_idx,
+                "seed": rep_seed,
+                "event_time": event_time,
+                "horizon": h,
+                "t": event_time + h,
+            }
+            oracle_weights = adapt.oracle_portfolio_weights[event_time + h]
+            for model_idx, model_name in enumerate(model_names):
+                row[model_name] = oracle_weights[model_idx]
+            oracle_weight_rows.append(row)
+
+        for method in adapt.methods:
+            for h in range(int(horizon)):
+                base = {
+                    "method": method,
+                    "event_index": event_global,
+                    "replication": rep_idx,
+                    "seed": rep_seed,
+                    "event_time": event_time,
+                    "horizon": h,
+                }
+                profile_rows["oracle_weight_profile"].append({
+                    **base,
+                    "oracle_weight_profile": adapt.oracle_weight_profiles[method][0, h],
+                })
+                profile_rows["oracle_gap_profile"].append({
+                    **base,
+                    "oracle_gap_profile": adapt.oracle_gap_profiles[method][0, h],
+                })
+                profile_rows["latent_risk"].append({
+                    **base,
+                    "latent_risk": adapt.latent_risk_profiles[method][0, h],
+                })
+                profile_rows["excess_risk"].append({
+                    **base,
+                    "excess_risk": adapt.excess_risk_profiles[method][0, h],
+                })
+                profile_rows["relative_gap"].append({
+                    **base,
+                    "relative_gap": adapt.relative_gap_profiles[method][0, h],
+                })
+
+            half_life_rows.append({
+                "method": method,
+                "event_index": event_global,
+                "replication": rep_idx,
+                "seed": rep_seed,
+                "event_time": event_time,
+                "half_life": adapt.half_lives[method][0],
+            })
+            recovery_rows.append({
+                "method": method,
+                "event_index": event_global,
+                "replication": rep_idx,
+                "seed": rep_seed,
+                "event_time": event_time,
+                "recovery_delay": adapt.recovery_delays[method][0],
+            })
+
+    excess_df = pd.DataFrame(profile_rows["excess_risk"])
+    latent_df = pd.DataFrame(profile_rows["latent_risk"])
+    overlap_df = pd.DataFrame(profile_rows["oracle_weight_profile"])
+    half_df = pd.DataFrame(half_life_rows)
+    recovery_df = pd.DataFrame(recovery_rows)
+
+    summary_rows = []
+    for method in methods:
+        method_excess = excess_df[excess_df["method"] == method]
+        method_latent = latent_df[latent_df["method"] == method]
+        method_overlap = overlap_df[overlap_df["method"] == method]
+        method_half = half_df[half_df["method"] == method]["half_life"].to_numpy(dtype=float)
+        method_recovery = recovery_df[recovery_df["method"] == method]["recovery_delay"].to_numpy(dtype=float)
+        if method_excess.empty:
+            continue
+        initial_excess = method_excess.loc[method_excess["horizon"] == 0, "excess_risk"].to_numpy(dtype=float)
+        initial_overlap = method_overlap.loc[method_overlap["horizon"] == 0, "oracle_weight_profile"].to_numpy(dtype=float)
+        summary_rows.append({
+            "Method": method,
+            "Events": int(method_excess["event_index"].nunique()),
+            "Replications": int(replications),
+            "Bias_Break_Time": int(T0),
+            "Horizon": int(horizon),
+            "Mean_Initial_Excess_Latent_Risk": _safe_nanmean(initial_excess),
+            "Mean_Integrated_Excess_Risk": _safe_nanmean(method_excess["excess_risk"].to_numpy(dtype=float)),
+            "Mean_Latent_Risk": _safe_nanmean(method_latent["latent_risk"].to_numpy(dtype=float)),
+            "Mean_Half_Life": _safe_nanmean(method_half),
+            "Median_Half_Life": _safe_nanmedian(method_half),
+            "Half_Life_Reached_Frac": float(np.mean(np.isfinite(method_half))),
+            "Mean_Target_Closure_Delay": _safe_nanmean(method_recovery),
+            "Captured_Frac": float(np.mean(np.isfinite(method_recovery))),
+            "Mean_Oracle_Overlap": _safe_nanmean(initial_overlap),
+        })
+
+    summary = pd.DataFrame(summary_rows)
+    summary["_order"] = summary["Method"].map({method: idx for idx, method in enumerate(methods)})
+    summary = summary.sort_values("_order").drop(columns="_order").reset_index(drop=True)
+
+    _paper_write_csv(summary, base_dir / "summary_table.csv", written_files)
+    _paper_write_csv(pd.DataFrame(event_rows), base_dir / "event_times.csv", written_files)
+    _paper_write_csv(pd.DataFrame(oracle_model_rows), base_dir / "oracle_models.csv", written_files)
+    _paper_write_csv(pd.DataFrame(oracle_weight_rows), base_dir / "oracle_portfolio_weights.csv", written_files)
+    _paper_write_csv(overlap_df, base_dir / "oracle_weight_profiles_long.csv", written_files)
+    _paper_write_csv(pd.DataFrame(profile_rows["oracle_gap_profile"]), base_dir / "oracle_gap_profiles_long.csv", written_files)
+    _paper_write_csv(latent_df, base_dir / "latent_risk_profiles_long.csv", written_files)
+    _paper_write_csv(excess_df, base_dir / "excess_risk_profiles_long.csv", written_files)
+    _paper_write_csv(pd.DataFrame(profile_rows["relative_gap"]), base_dir / "relative_gap_profiles_long.csv", written_files)
+    _paper_write_csv(half_df, base_dir / "half_lives_long.csv", written_files)
+    _paper_write_csv(recovery_df, base_dir / "recovery_delays_long.csv", written_files)
+    _paper_write_csv(
+        pd.DataFrame([{
+            "scenario": "2A",
+            "replications": int(replications),
+            "M": int(M),
+            "T": int(T),
+            "T0": int(T0),
+            "bias_break_time": int(T0),
+            "seed_start": int(seed),
+            "seed_end": int(seed + replications - 1),
+            "horizon": int(horizon),
+            "smooth_window": int(smooth_window),
+            "target_oracle_weight": float(target_oracle_weight),
+            "fast_fixed_ld": bool(bt_cfg.fast_fixed_ld),
+            "event_definition": "known Scenario 2A bias break",
+        }]),
+        base_dir / "multi_sim_metadata.csv",
+        written_files,
+    )
+    return written_files
+
+
+def regenerate_2b_multi_sim_adaptability_csv_export(
+    csv_root: Union[str, Path] = "Empirical_Data/empirical_outputs/replot_csv_exports",
+    M: int = 8,
+    T: int = 400,
+    T0: int = 200,
+    seed: int = 42,
+    replications: int = 50,
+    horizon: int = 80,
+    smooth_window: int = 5,
+    target_oracle_weight: float = 0.60,
+    bt_cfg: Optional[BacktestConfig] = None,
+    verbose: bool = True,
+) -> List[str]:
+    """Regenerate Scenario 2B adaptability CSVs over many drifting-bias simulations."""
+    csv_root = Path(csv_root)
+    base_dir = csv_root / "adaptability" / "adapt_2B"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    written_files: List[str] = []
+
+    if replications <= 0:
+        raise ValueError("replications must be positive for the 2B adaptability rerun.")
+    if T0 >= T:
+        raise ValueError("T0 must be smaller than T for the 2B adaptability rerun.")
+
+    bt_cfg = bt_cfg if bt_cfg is not None else _paper_base_backtest_config()
+    methods = list(PAPER_ADAPTABILITY_METHOD_ORDER)
+    model_names = _paper_model_names(M)
+
+    event_rows = []
+    oracle_model_rows = []
+    oracle_weight_rows = []
+    profile_rows = {
+        "oracle_weight_profile": [],
+        "oracle_gap_profile": [],
+        "latent_risk": [],
+        "excess_risk": [],
+        "relative_gap": [],
+    }
+    half_life_rows = []
+    recovery_rows = []
+    global_event_idx = 0
+
+    for rep_idx in range(int(replications)):
+        rep_seed = int(seed + rep_idx)
+        if verbose:
+            print(
+                f"Scenario 2B adaptability replication {rep_idx + 1}/{replications} "
+                f"(seed={rep_seed})..."
+            )
+
+        data = generate_scenario(scenario_2B(M=M, T=T, T0=T0, seed=rep_seed))
+        res = run_backtest(data, bt_cfg, verbose=False)
+        adapt = compute_adaptability_diagnostics(
+            data,
+            res,
+            methods=methods,
+            horizon=horizon,
+            smooth_window=smooth_window,
+            target_oracle_weight=target_oracle_weight,
+        )
+        oracle = compute_latent_oracle_indices(data)
+
+        for local_event_idx, event_time_raw in enumerate(adapt.event_times):
+            event_time = int(event_time_raw)
+            event_global = global_event_idx
+            global_event_idx += 1
+            oracle_pre = int(oracle[event_time - 1]) if event_time > 0 else int(oracle[event_time])
+            oracle_post = int(oracle[event_time])
+            event_rows.append({
+                "event_index": event_global,
+                "replication": rep_idx,
+                "seed": rep_seed,
+                "event_time": event_time,
+                "oracle_pre": oracle_pre,
+                "oracle_post": oracle_post,
+                "oracle_single_changed": bool(oracle_pre != oracle_post),
+            })
+            oracle_model_rows.append({
+                "event_index": event_global,
+                "replication": rep_idx,
+                "seed": rep_seed,
+                "event_time": event_time,
+                "oracle_model": oracle_post,
+            })
+
+            max_use_len = min(int(horizon), T - event_time)
+            for h in range(max_use_len):
+                row = {
+                    "event_index": event_global,
+                    "replication": rep_idx,
+                    "seed": rep_seed,
+                    "event_time": event_time,
+                    "horizon": h,
+                    "t": event_time + h,
+                }
+                oracle_weights = adapt.oracle_portfolio_weights[event_time + h]
+                for model_idx, model_name in enumerate(model_names):
+                    row[model_name] = oracle_weights[model_idx]
+                oracle_weight_rows.append(row)
+
+            for method in adapt.methods:
+                for h in range(int(horizon)):
+                    base = {
+                        "method": method,
+                        "event_index": event_global,
+                        "replication": rep_idx,
+                        "seed": rep_seed,
+                        "event_time": event_time,
+                        "horizon": h,
+                    }
+                    profile_rows["oracle_weight_profile"].append({
+                        **base,
+                        "oracle_weight_profile": adapt.oracle_weight_profiles[method][local_event_idx, h],
+                    })
+                    profile_rows["oracle_gap_profile"].append({
+                        **base,
+                        "oracle_gap_profile": adapt.oracle_gap_profiles[method][local_event_idx, h],
+                    })
+                    profile_rows["latent_risk"].append({
+                        **base,
+                        "latent_risk": adapt.latent_risk_profiles[method][local_event_idx, h],
+                    })
+                    profile_rows["excess_risk"].append({
+                        **base,
+                        "excess_risk": adapt.excess_risk_profiles[method][local_event_idx, h],
+                    })
+                    profile_rows["relative_gap"].append({
+                        **base,
+                        "relative_gap": adapt.relative_gap_profiles[method][local_event_idx, h],
+                    })
+
+                half_life_rows.append({
+                    "method": method,
+                    "event_index": event_global,
+                    "replication": rep_idx,
+                    "seed": rep_seed,
+                    "event_time": event_time,
+                    "half_life": adapt.half_lives[method][local_event_idx],
+                })
+                recovery_rows.append({
+                    "method": method,
+                    "event_index": event_global,
+                    "replication": rep_idx,
+                    "seed": rep_seed,
+                    "event_time": event_time,
+                    "recovery_delay": adapt.recovery_delays[method][local_event_idx],
+                })
+
+    excess_df = pd.DataFrame(profile_rows["excess_risk"])
+    latent_df = pd.DataFrame(profile_rows["latent_risk"])
+    overlap_df = pd.DataFrame(profile_rows["oracle_weight_profile"])
+    half_df = pd.DataFrame(half_life_rows)
+    recovery_df = pd.DataFrame(recovery_rows)
+
+    summary_rows = []
+    for method in methods:
+        method_excess = excess_df[excess_df["method"] == method]
+        method_latent = latent_df[latent_df["method"] == method]
+        method_overlap = overlap_df[overlap_df["method"] == method]
+        method_half = half_df[half_df["method"] == method]["half_life"].to_numpy(dtype=float)
+        method_recovery = recovery_df[recovery_df["method"] == method]["recovery_delay"].to_numpy(dtype=float)
+        if method_excess.empty:
+            continue
+        initial_excess = method_excess.loc[method_excess["horizon"] == 0, "excess_risk"].to_numpy(dtype=float)
+        initial_overlap = method_overlap.loc[method_overlap["horizon"] == 0, "oracle_weight_profile"].to_numpy(dtype=float)
+        mean_half_life = _safe_nanmean(method_half)
+        median_half_life = _safe_nanmedian(method_half)
+        half_life_reached_frac = float(np.mean(np.isfinite(method_half)))
+        if method == "equal":
+            mean_half_life = np.nan
+            median_half_life = np.nan
+            half_life_reached_frac = 0.0
+        summary_rows.append({
+            "Method": method,
+            "Events": int(method_excess["event_index"].nunique()),
+            "Replications": int(replications),
+            "Horizon": int(horizon),
+            "Mean_Initial_Excess_Latent_Risk": _safe_nanmean(initial_excess),
+            "Mean_Integrated_Excess_Risk": _safe_nanmean(method_excess["excess_risk"].to_numpy(dtype=float)),
+            "Mean_Latent_Risk": _safe_nanmean(method_latent["latent_risk"].to_numpy(dtype=float)),
+            "Mean_Half_Life": mean_half_life,
+            "Median_Half_Life": median_half_life,
+            "Half_Life_Reached_Frac": half_life_reached_frac,
+            "Mean_Target_Closure_Delay": _safe_nanmean(method_recovery),
+            "Captured_Frac": float(np.mean(np.isfinite(method_recovery))),
+            "Mean_Oracle_Overlap": _safe_nanmean(initial_overlap),
+        })
+
+    summary = pd.DataFrame(summary_rows)
+    summary["_order"] = summary["Method"].map({method: idx for idx, method in enumerate(methods)})
+    summary = summary.sort_values("_order").drop(columns="_order").reset_index(drop=True)
+
+    _paper_write_csv(summary, base_dir / "summary_table.csv", written_files)
+    _paper_write_csv(pd.DataFrame(event_rows), base_dir / "event_times.csv", written_files)
+    _paper_write_csv(pd.DataFrame(oracle_model_rows), base_dir / "oracle_models.csv", written_files)
+    _paper_write_csv(pd.DataFrame(oracle_weight_rows), base_dir / "oracle_portfolio_weights.csv", written_files)
+    _paper_write_csv(overlap_df, base_dir / "oracle_weight_profiles_long.csv", written_files)
+    _paper_write_csv(pd.DataFrame(profile_rows["oracle_gap_profile"]), base_dir / "oracle_gap_profiles_long.csv", written_files)
+    _paper_write_csv(latent_df, base_dir / "latent_risk_profiles_long.csv", written_files)
+    _paper_write_csv(excess_df, base_dir / "excess_risk_profiles_long.csv", written_files)
+    _paper_write_csv(pd.DataFrame(profile_rows["relative_gap"]), base_dir / "relative_gap_profiles_long.csv", written_files)
+    _paper_write_csv(half_df, base_dir / "half_lives_long.csv", written_files)
+    _paper_write_csv(recovery_df, base_dir / "recovery_delays_long.csv", written_files)
+    _paper_write_csv(
+        pd.DataFrame([{
+            "scenario": "2B",
+            "replications": int(replications),
+            "M": int(M),
+            "T": int(T),
+            "T0": int(T0),
+            "seed_start": int(seed),
+            "seed_end": int(seed + replications - 1),
+            "horizon": int(horizon),
+            "smooth_window": int(smooth_window),
+            "target_oracle_weight": float(target_oracle_weight),
+            "fast_fixed_ld": bool(bt_cfg.fast_fixed_ld),
+            "event_definition": "latent oracle switches in smooth-bias-drift simulations",
+            "events": int(len(event_rows)),
+        }]),
+        base_dir / "multi_sim_metadata.csv",
+        written_files,
+    )
+    return written_files
+
+
+def _paper_base_backtest_config() -> BacktestConfig:
+    """Backtest settings used for regenerated simulation paper exports."""
+    return BacktestConfig(
+        d_max=3,
+        fixed_d=1,
+        fixed_h1=0.25,
+        fixed_h2=0.35,
+        fast_fixed_ld=True,
+        loss_diff_versions=("legacy", "v2"),
+        adjacency_type="standardized",
+        centrality_type="eigenvector",
+        centrality_types=("eigenvector", "pagerank", "softmax"),
+        cov_method="shrinkage",
+        cov_window=50,
+        alpha=0.1,
+        gamma=0.1,
+        tune_window=30,
+        min_history=30,
+        recent_best_window=20,
+        window_grid=(20, 40, 60),
+        bg_window=50,
+        var_fixed_lag=1,
+    )
+
+
+def _paper_sensitivity_backtest_config() -> BacktestConfig:
+    """Enhanced backtest settings used for simulation sensitivity sweeps."""
+    return BacktestConfig(
+        d_max=3,
+        fixed_d=1,
+        fixed_h1=0.25,
+        fixed_h2=0.35,
+        fast_fixed_ld=True,
+        loss_diff_versions=("legacy",),
+        adjacency_type="standardized",
+        centrality_type="eigenvector",
+        centrality_types=("eigenvector", "pagerank", "softmax"),
+        cov_method="shrinkage",
+        cov_window=40,
+        alpha=0.1,
+        gamma=0.1,
+        tune_window=40,
+        estimate_window=False,
+        window_grid=(20, 40, 60),
+        min_history=30,
+        recent_best_window=20,
+        bg_window=40,
+        var_window=40,
+        var_fixed_lag=1,
+        include_benchmarks=False,
+    )
+
+
+def regenerate_simulation_replot_csv_exports(
+    csv_root: Union[str, Path] = "Empirical_Data/empirical_outputs/replot_csv_exports",
+    M: int = 8,
+    T: int = 400,
+    T0: int = 200,
+    seed: int = 42,
+    sensitivity_mcs_B: int = 100,
+    adaptability_2a_replications: int = 50,
+    adaptability_2a_horizon: int = 80,
+    adaptability_2b_replications: int = 50,
+    adaptability_2b_horizon: int = 80,
+    verbose: bool = True,
+) -> List[str]:
+    """
+    Regenerate the simulation-backed CSV exports used by paper replots.
+
+    Empirical CSV exports are left untouched. The legacy `4A` folder names are
+    preserved for backward-compatible readers, while the plotting layer displays
+    that scenario as 3A.
+    """
+    csv_root = Path(csv_root)
+    csv_root.mkdir(parents=True, exist_ok=True)
+    written_files: List[str] = []
+
+    scenario_factories = {
+        "1A": scenario_1A,
+        "2A": scenario_2A,
+        "2B": scenario_2B,
+        "2C": scenario_2C,
+        "4A": scenario_4A,
+    }
+    scenario_data: Dict[str, SimulationData] = {}
+    model_names = _paper_model_names(M)
+
+    for scenario_key, factory in scenario_factories.items():
+        if verbose:
+            print(f"Generating Scenario {scenario_display_label(scenario_key)} with T={T}, T0={T0}...")
+        data = generate_scenario(factory(M=M, T=T, T0=T0, seed=seed))
+        scenario_data[scenario_key] = data
+        _paper_export_simulation_data(f"scenario_{scenario_key}", data, csv_root, written_files, model_names=model_names)
+
+    bt_cfg = _paper_base_backtest_config()
+    backtests: Dict[str, BacktestResult] = {}
+    for scenario_key, data in scenario_data.items():
+        if verbose:
+            print(f"Running paper backtest for Scenario {scenario_display_label(scenario_key)}...")
+        res = run_backtest(data, bt_cfg, verbose=False)
+        backtests[scenario_key] = res
+        if scenario_key == "2A":
+            export_name = "res_2A"
+        elif scenario_key == "2B":
+            export_name = "res_2B"
+        else:
+            export_name = f"mcs_backtest_{scenario_key}"
+        _paper_export_backtest_result(export_name, res, csv_root, written_files, model_names=model_names)
+
+    if verbose:
+        print(
+            "Computing multi-simulation adaptability diagnostics for Scenario 2A "
+            f"with {adaptability_2a_replications} replications..."
+        )
+    written_files.extend(
+        regenerate_2a_multi_sim_adaptability_csv_export(
+            csv_root=csv_root,
+            M=M,
+            T=T,
+            T0=T0,
+            seed=seed,
+            replications=adaptability_2a_replications,
+            horizon=adaptability_2a_horizon,
+            smooth_window=5,
+            target_oracle_weight=0.60,
+            bt_cfg=bt_cfg,
+            verbose=verbose,
+        )
+    )
+    if verbose:
+        print(
+            "Computing multi-simulation adaptability diagnostics for Scenario 2B "
+            f"with {adaptability_2b_replications} replications..."
+        )
+    written_files.extend(
+        regenerate_2b_multi_sim_adaptability_csv_export(
+            csv_root=csv_root,
+            M=M,
+            T=T,
+            T0=T0,
+            seed=seed,
+            replications=adaptability_2b_replications,
+            horizon=adaptability_2b_horizon,
+            smooth_window=5,
+            target_oracle_weight=0.60,
+            bt_cfg=bt_cfg,
+            verbose=verbose,
+        )
+    )
+
+    sensitivity_cfg = _paper_sensitivity_backtest_config()
+    simulation_sweeps: List[SensitivitySweepResult] = []
+    for scenario_key, data in scenario_data.items():
+        if verbose:
+            print(f"Running sensitivity sweep for Scenario {scenario_display_label(scenario_key)}...")
+        sweep = run_sensitivity_sweep(
+            data,
+            bt_cfg=sensitivity_cfg,
+            source_name=f"simulation_{scenario_key}",
+            source_type="simulation",
+            cov_methods=("rolling", "ewma", "shrinkage"),
+            mcs_B=sensitivity_mcs_B,
+            verbose=False,
+        )
+        simulation_sweeps.append(sweep)
+        _paper_export_sensitivity_sweep(sweep, csv_root, written_files)
+
+    simulation_summary = aggregate_sensitivity_sweeps(simulation_sweeps)
+    _paper_write_csv(simulation_summary, csv_root / "sensitivity_summaries" / "simulation_sweep_summary" / "summary.csv", written_files)
+    _paper_write_csv(simulation_summary, csv_root / "tables" / "simulation_sweep_summary.csv", written_files)
+    _paper_write_csv(
+        pd.DataFrame([{
+            "M": M,
+            "T": T,
+            "T0": T0,
+            "seed": seed,
+            "sensitivity_mcs_B": sensitivity_mcs_B,
+            "adaptability_2a_replications": adaptability_2a_replications,
+            "adaptability_2a_horizon": adaptability_2a_horizon,
+            "adaptability_2b_replications": adaptability_2b_replications,
+            "adaptability_2b_horizon": adaptability_2b_horizon,
+            "scenarios": ", ".join(scenario_display_label(key) for key in scenario_factories),
+        }]),
+        csv_root / "paper_replot_simulation_run_metadata.csv",
+        written_files,
+    )
+    return written_files
+
+
+def generate_paper_replots(
+    csv_root: Union[str, Path] = "Empirical_Data/empirical_outputs/replot_csv_exports",
+    output_dir: Union[str, Path] = "Empirical_Data/empirical_outputs/paper_replots",
+) -> Dict[str, List[str]]:
+    """
+    Generate paper-ready figures and tables from exported CSVs.
+
+    This function intentionally avoids rerunning simulations or backtests. It reads the
+    existing `replot_csv_exports` tree and writes publication-facing artifacts with
+    stable labels, Scenario 3A display names, and grayscale-friendly styling.
+    """
+    set_plot_style()
+    csv_root = Path(csv_root)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    artifacts: Dict[str, List[str]] = {}
+
+    empirical_inputs = (
+        (
+            "inflation",
+            "Inflation forecaster correlation",
+            "Inflation: realized HICP and SPF forecast range",
+            "Inflation (%)",
+            "Empirical_Data/inflation_forecasts_f.csv",
+            "Empirical_Data/inflation_truth_f.csv",
+        ),
+        (
+            "unemployment",
+            "Unemployment forecaster correlation",
+            "Unemployment: realized value and SPF forecast range",
+            "Unemployment (%)",
+            "Empirical_Data/unemployment_forecasts_f.csv",
+            "Empirical_Data/unemployment_truth_f.csv",
+        ),
+    )
+    for slug, heatmap_title, range_title, y_label, forecast_path, truth_path in empirical_inputs:
+        merged, forecaster_ids = _paper_load_empirical_panel(forecast_path, truth_path)
+        fig = _paper_plot_forecaster_heatmap(merged, forecaster_ids, heatmap_title)
+        _paper_save_figure(
+            fig,
+            output_dir,
+            f"data_corr_heatmap_{slug}",
+            artifacts,
+            caption=(
+                f"Correlation heatmap for the {slug} data section. The realized value is "
+                "denoted by y and individual SPF forecasters are denoted by f_i."
+            ),
+        )
+        fig = _paper_plot_spf_range(merged, forecaster_ids, range_title, y_label)
+        _paper_save_figure(
+            fig,
+            output_dir,
+            f"spf_range_{slug}",
+            artifacts,
+            caption=(
+                f"Realized {slug} and SPF forecast dispersion. The shaded band is the "
+                "cross-forecaster forecast range, the dashed line is the SPF median, and "
+                "the solid black line is the realized value. The vertical axis is measured "
+                "in percentage points."
+            ),
+        )
+
+    _paper_write_rs_original_table(csv_root, output_dir, artifacts)
+    _paper_plot_simulation_forecasts_errors(csv_root, output_dir, artifacts)
+    _paper_plot_sensitivity_figures(csv_root, output_dir, artifacts)
+    _paper_plot_empirical_headline(csv_root, output_dir, artifacts)
+    _paper_plot_empirical_diff_oos_forecasts(csv_root, output_dir, artifacts)
+    _paper_plot_rs_pairwise(csv_root, output_dir, artifacts)
+    _paper_plot_weight_stability(csv_root, output_dir, artifacts)
+    _paper_plot_weight_paths_a4(csv_root, output_dir, artifacts)
+    _paper_plot_adaptability_figures(csv_root, output_dir, artifacts)
+
+    manifest_rows = [
+        {"Artifact": name, "Path": path}
+        for name, paths in artifacts.items()
+        for path in paths
+    ]
+    manifest_path = output_dir / "paper_replots_manifest.csv"
+    pd.DataFrame(manifest_rows).to_csv(manifest_path, index=False)
+    artifacts["paper_replots_manifest"] = [str(manifest_path)]
+    return artifacts
 
 
 # ===================================================================

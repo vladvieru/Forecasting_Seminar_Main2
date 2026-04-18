@@ -1,0 +1,2 @@
+scenario,replications,M,T,T0,seed_start,seed_end,horizon,smooth_window,target_oracle_weight,fast_fixed_ld,event_definition,events
+2B,50,8,400,200,42,91,80,5,0.6,True,latent oracle switches in smooth-bias-drift simulations,307

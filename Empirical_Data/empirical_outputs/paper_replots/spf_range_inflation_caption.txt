@@ -1,0 +1,1 @@
+Realized inflation and SPF forecast dispersion. The shaded band is the cross-forecaster forecast range, the dashed line is the SPF median, and the solid black line is the realized value. The vertical axis is measured in percentage points.
