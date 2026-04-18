@@ -1,0 +1,1 @@
+GLIDER covariance sensitivity across empirical applications and simulation exercises. Side-by-side bars show relative MSFE for rolling, EWMA, and shrinkage covariance estimators, averaged over the three centralities; the dotted reference line marks equal-weight performance.

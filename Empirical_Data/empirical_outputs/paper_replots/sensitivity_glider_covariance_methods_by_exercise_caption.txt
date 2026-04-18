@@ -1,0 +1,1 @@
+Exercise-by-exercise GLIDER covariance sensitivity. Side-by-side bars show relative MSFE for each covariance estimator within each simulation exercise, averaged over the three centralities; the dotted reference line marks equal-weight performance.

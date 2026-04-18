@@ -1,0 +1,1 @@
+Correlation heatmap for the inflation data section. The realized value is denoted by y and individual SPF forecasters are denoted by f_i.

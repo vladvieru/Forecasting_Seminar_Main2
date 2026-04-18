@@ -1,0 +1,485 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{hyperref}
+
+\linespread{1.08}
+\hypersetup{colorlinks=true, linkcolor=black, urlcolor=blue, citecolor=black}
+
+\newcommand{\simplex}{\Delta^{M-1}}
+
+\begin{document}
+
+\hypersetup{pageanchor=false}
+\begin{titlepage}
+\begin{center}
+{\LARGE Loss-Differential Forecast Combination in Unstable Environments\par}
+\vspace{0.4cm}
+{\large Forecasting Seminar\par}
+\vspace{1.0cm}
+{\Large Draft of Vlad Sections\par}
+\vspace{0.8cm}
+Supervisor:\par
+Hans Ligtenberg\par
+\vspace{0.8cm}
+Group Member:\par
+Vlad Vieru (677645)\par
+\vspace{0.8cm}
+April 12, 2026
+\end{center}
+
+\vfill
+
+\noindent This draft contains the sections assigned to Vlad and is written to match the style of the team report. Section numbering is kept consistent with the full paper. One implementation detail matters for the interpretation of the reported simulation numbers: the scenario constructors in \texttt{functionality.py} default to $(M,T,T_0)=(8,400,200)$, but the exported Monte Carlo and backtest outputs used below were generated in \texttt{main.ipynb} with \texttt{SIMULATION\_DIMENSIONS = \{M=8, T=300, T0=150\}} and \texttt{SIMULATION\_REPS = 20}. Accordingly, the mathematics below is written in general notation, while the numerical discussion refers to the exported $(8,300,150)$ design.
+\end{titlepage}
+\hypersetup{pageanchor=true}
+
+\setcounter{section}{1}
+\section{Literature Review}
+
+The unstable-forecast-evaluation literature provides the main motivation for our forward-looking combination setup. Giacomini and White (2006) show that predictive ability should be judged conditionally on information available at the forecast origin, not only through unconditional full-sample averages. Giacomini and Rossi (2010) sharpen this point by emphasizing that, in unstable environments, the time path of relative forecast performance is itself economically meaningful. This perspective is directly relevant for our setting. If relative losses move over time, then a combination rule that only learns from long-run average performance will react too slowly exactly when the ranking of forecasters changes. Granziera and Sekhposyan (2019) and Zhu and Timmermann (2022) push this literature toward explicitly forward-looking decisions by showing that relative forecast performance can itself be predicted and then used for model rotation. Our contribution follows the same logic, but replaces discrete selection by a smooth weighting rule. This matters because unstable environments create a trade-off between responsiveness and estimation error: a method should react to changing local conditions, but it should not overfit noisy short-run fluctuations in pairwise loss differentials.
+
+\subsection{Centrality Measures in the Graph Layer}
+
+Once the predicted pairwise loss differentials are organized into a directed graph, centrality measures become a natural way to aggregate local dominance information into a single cross-sectional ranking. The key point is that not all ``wins'' are equally informative. A forecaster that is expected to outperform several already-strong forecasters should receive more credit than a forecaster whose predicted gains come only against weak competitors. This recursive logic is exactly what eigenvector centrality captures; in Bonacich (1972), a node's importance depends on the importance of the nodes to which it is connected. In our application, this means that forecast quality is propagated through the pairwise dominance network rather than being reduced to a simple count of favorable bilateral comparisons. PageRank adds an additional layer of regularization through damping and teleportation (Page et al., 1999). That is attractive here because the dominance graph is estimated repeatedly in short rolling windows and can therefore be sparse, noisy, or nearly reducible. In such settings, PageRank is less likely to place extreme mass on a small subset of nodes for purely mechanical reasons. For that reason, eigenvector centrality and PageRank are not arbitrary graph statistics in our framework; they are disciplined ways to translate predicted local outperformance into stable, globally comparable portfolio weights.
+
+\subsection{Adaptability and Post-Break Performance}
+
+Adaptability deserves separate discussion because average loss rankings can conceal the precise dimension of performance that matters most in unstable environments: how quickly a method relearns after the identity of the best forecaster changes. This concern is consistent with the broader literature on forecasting under instability. Giacomini and Rossi (2009) formalize the notion of a forecast breakdown and make clear that deterioration should be studied locally rather than only through unconditional averages. Tian and Anderson (2014) show that when structural breaks are plausible, combining across estimation windows can dominate committing to a single post-break window. Zhao (2021) reaches a related conclusion in a broad Monte Carlo study: no advanced combination rule dominates uniformly across all forms of instability, and the value of a method depends on the origin and persistence of the change. These results suggest that a useful simulation diagnostic should separate two questions. First, how large is the performance loss immediately after a break? Second, how fast does the method recover from that loss? The adaptability measure used below is designed exactly for this purpose. It is not a named classical estimator from the literature; rather, it is a simulation-specific event-study summary built in the spirit of the forecast-breakdown and structural-break combination literatures. After each latent oracle switch, we compare the method's latent expected risk with the risk of the time-varying oracle combination and summarize the resulting path through integrated excess risk and half-life.
+
+\setcounter{section}{4}
+\section{Simulation}
+
+\subsection{Simulation Environment}
+
+The simulation design proceeds in three layers: data generation, rolling forecast combination, and post-switch adaptability evaluation. In what follows, $j=1,\dots,M$ indexes forecasters and $t=0,\dots,T-1$ indexes time. The realized target is $y_t$, the forecast of forecaster $j$ is $f_{j,t}$, and the forecast error is
+\begin{equation}
+e_{j,t} = y_t - f_{j,t} = c_t - b_{j,t} - u_{j,t},
+\end{equation}
+where $c_t$ is a common shock, $b_{j,t}$ is the forecaster-specific bias component, and $u_{j,t}$ is the idiosyncratic error component. The target series is specified as
+\begin{equation}
+y_t = s_t + c_t,
+\end{equation}
+where $s_t$ is a mild random-walk signal, and forecasts are then recovered from $f_{j,t}=y_t-e_{j,t}$. Throughout the simulation section, evaluation is under squared loss,
+\begin{equation}
+L_{j,t} = (y_t - f_{j,t})^2 = e_{j,t}^2.
+\end{equation}
+
+At each out-of-sample forecast origin $t$, the backtest uses only information available up to $t-1$ to construct combination weights for the vector $(f_{1,t},\dots,f_{M,t})'$. The feasible weight set is the simplex
+\begin{equation}
+\simplex = \left\{ w \in [0,1]^M : \iota'w = 1 \right\},
+\end{equation}
+so every reported method is a long-only forecast combination.
+
+\subsection{Pairwise Loss-Differential Graph}
+
+The first layer of the methodology is built from pairwise loss differentials. For each pair $(i,j)$, define
+\begin{equation}
+\Delta L_{ij,t} = L_{i,t} - L_{j,t}.
+\end{equation}
+Using the historical path $\{\Delta L_{ij,s}\}_{s < t}$, the algorithm estimates a one-step-ahead conditional mean and scale,
+\begin{equation}
+\widehat{\mu}_{ij,t} = \mathbb{E}_{t-1}[\Delta L_{ij,t}],
+\qquad
+\widehat{\sigma}_{ij,t} = \sqrt{\mathbb{V}_{t-1}(\Delta L_{ij,t})}.
+\end{equation}
+These forecasts are then transformed into a directed adjacency matrix. Under the default standardized adjacency used by the backtest configuration,
+\begin{equation}
+A_{ij,t} = \max\left\{ \frac{-\widehat{\mu}_{ij,t}}{\widehat{\sigma}_{ij,t}+c},\,0 \right\},
+\qquad A_{ii,t}=0,
+\end{equation}
+with a small regularization constant $c>0$. Hence, a positive edge from $i$ to $j$ appears only when forecaster $i$ is predicted to beat forecaster $j$ in the next period.
+
+The graph layer converts $A_t$ into a score vector $r_t \in \simplex$. For eigenvector centrality, the score solves the fixed-point relation
+\begin{equation}
+r_t \propto \left(A_t + \varepsilon \frac{\iota\iota'}{M}\right) r_t,
+\end{equation}
+where $\varepsilon>0$ is a teleportation term that prevents reducibility. For PageRank, let $P_t$ be the column-normalized version of $A_t$; then
+\begin{equation}
+r_t = \alpha_{\mathrm{PR}} P_t r_t + (1-\alpha_{\mathrm{PR}})\frac{\iota}{M},
+\end{equation}
+with damping factor $\alpha_{\mathrm{PR}}=0.85$. The comparison sweep also evaluates a softmax score,
+\begin{equation}
+s_{i,t} = \frac{1}{M-1}\sum_{j \neq i} \left(-\widehat{\mu}_{ij,t}\right),
+\qquad
+r_{i,t}^{\mathrm{soft}} = \frac{\exp(s_{i,t}/\tau)}{\sum_{k=1}^M \exp(s_{k,t}/\tau)},
+\end{equation}
+which is not a network centrality in the strict graph-theoretic sense, but is useful as a smooth non-recursive comparator.
+
+\subsection{Combination Rules}
+
+The graph-only benchmark simply normalizes the graph score,
+\begin{equation}
+w_t^{\mathrm{GO}} = r_t.
+\end{equation}
+The main method, \texttt{full\_gcsr}, combines graph information with forecast-error covariance regularization. Let $\widehat{\Sigma}_t$ denote the covariance estimate from the error panel and let $\bar{w}=\iota/M$. The corresponding weight vector is defined by
+\begin{equation}
+w_t^{\mathrm{GCSR}}
+=
+\arg\min_{w \in \simplex}
+\left\{
+w'\widehat{\Sigma}_t w
+- \alpha_t r_t' w
+\,+\, \gamma_t \lVert w-\bar{w}\rVert_2^2
+\right\}.
+\end{equation}
+The first term penalizes forecast combinations with high estimated error variance, the second rewards graph-central forecasters, and the third shrinks the solution toward equal weights. The tuning parameters $(\alpha_t,\gamma_t)$ are chosen by rolling validation in the backtest.
+
+For comparison, the simulation study also evaluates the following benchmarks:
+\begin{itemize}
+\item \texttt{equal}: $w_t = \bar{w}$.
+\item \texttt{recent\_best}: all weight on the forecaster with the lowest recent average loss.
+\item \texttt{bates\_granger\_mv}: simplex-constrained minimum-variance weights based on rolling forecast errors.
+\item \texttt{rs\_selection}: a Richter-Smetanina style selector that places unit mass on the forecaster predicted to beat the largest number of competitors.
+\item \texttt{var\_error}: a VAR benchmark for the error panel. If $\mu_{e,t+1|t}$ is the conditional mean forecast of the error vector and $\Sigma_{u,t}$ its innovation covariance, then the method minimizes
+\begin{equation}
+\mathbb{E}_{t}\!\left[(w'e_{t+1})^2\right]
+=
+w'(\Sigma_{u,t}+\mu_{e,t+1|t}\mu_{e,t+1|t}')w
+\end{equation}
+over $w \in \simplex$.
+\end{itemize}
+
+\subsection{Scenario Design}
+
+All scenarios are generated from the same forecast-error decomposition
+\begin{equation}
+e_{j,t}=c_t-b_{j,t}-\sigma_{j,t}\varepsilon_{j,t},
+\qquad
+c_t \sim \mathcal{N}(0,\sigma_c^2),
+\qquad
+\varepsilon_{j,t}\overset{\mathrm{i.i.d.}}{\sim}\mathcal{N}(0,1),
+\end{equation}
+for $j=1,\dots,M$ and $t=0,\dots,T-1$, with $M=8$, $\sigma_c=0.5$, and squared-error loss $\ell_{j,t}=e_{j,t}^2$. Since the common shock $c_t$ enters all forecasters symmetrically, the cross-sectional ranking is driven by the latent bias component $b_{j,t}$ and the idiosyncratic scale component $\sigma_{j,t}$. Under squared loss, the conditional risk of forecaster $j$ is therefore
+\begin{equation}
+\mathcal{R}_{j,t}
+=
+\mathbb{E}\!\left[e_{j,t}^2 \mid \mathcal{F}_{t-1}\right]
+=
+\sigma_c^2+b_{j,t}^2+\sigma_{j,t}^2,
+\end{equation}
+so each design below corresponds to a different law of motion for the pair $(b_{j,t},\sigma_{j,t})$. This makes the scenario family structural rather than illustrative: each case isolates a specific form of instability and therefore allows the performance of the combination rules to be interpreted in economic terms.
+
+\paragraph{Scenario 1A: stable benchmark.}
+The first design is the null of stability,
+\begin{equation}
+b_{j,t}=0,
+\qquad
+\sigma_{j,t}=1,
+\qquad
+j=1,\dots,M,\ \ t=0,\dots,T-1.
+\end{equation}
+Hence $\mathcal{R}_{j,t}=\sigma_c^2+1$ for all $j$ and $t$, so no forecaster has a persistent latent advantage. The role of Scenario 1A is disciplinary. If a method is valuable because it adapts to instability, it should not generate systematic gains when the ranking is flat and time-invariant. This scenario therefore serves as a size-control exercise for the adaptive machinery: strong performance here would indicate overfitting or unnecessary estimation noise rather than genuine learning.
+
+\paragraph{Scenario 2A: abrupt structural break in relative bias.}
+The second design introduces a single structural break in relative bias through a piecewise-constant process,
+\begin{equation}
+b_{j,t}
+=
+b^{\mathrm{pre}}_j \mathbf{1}\{t<t_b\}
++ 
+b^{\mathrm{post}}_j \mathbf{1}\{t\geq t_b\},
+\qquad
+t_b = \lfloor T/2 \rfloor,
+\end{equation}
+where $b^{\mathrm{pre}}_j$ and $b^{\mathrm{post}}_j$ are independently drawn from a uniform distribution on $[0,1]$, while
+\begin{equation}
+\sigma_{j,t}=1.
+\end{equation}
+This implies a discrete jump in the risk ranking,
+\begin{equation}
+\mathcal{R}_{j,t}
+=
+\sigma_c^2+1+\left(b^{\mathrm{pre}}_j\right)^2
+\quad \text{for } t<t_b,
+\qquad
+\mathcal{R}_{j,t}
+=
+\sigma_c^2+1+\left(b^{\mathrm{post}}_j\right)^2
+\quad \text{for } t\geq t_b.
+\end{equation}
+The scenario captures the classical structural-break problem: a rule that was well calibrated in the first regime becomes misallocated in the second. Its purpose is to test post-break reallocation. Procedures based on long historical windows should be penalized because they average across regimes, whereas genuinely adaptive methods should absorb the break rapidly without introducing excessive pre-break volatility.
+
+\paragraph{Scenario 2B: smooth drift in relative bias.}
+The third design replaces the discrete break by smooth first-moment instability. For each forecaster,
+\begin{equation}
+b_{j,t}=b_{j,t-1}+s_{j,t},
+\qquad
+s_{j,t}= \rho_b s_{j,t-1}+\eta_{j,t},
+\qquad
+\eta_{j,t}\sim \mathcal{N}(0,\sigma_{\eta}^2),
+\end{equation}
+with persistence parameter $\rho_b=0.95$ and innovation variance $\sigma_{\eta}^2=5\times 10^{-4}$, while $\sigma_{j,t}=1$. Since the slope process $s_{j,t}$ is highly persistent, the induced changes in $\mathcal{R}_{j,t}=\sigma_c^2+1+b_{j,t}^2$ are gradual rather than discontinuous. The purpose of this design is to represent environments in which predictive ability deteriorates progressively instead of collapsing at a known break date. This is the scenario in which forward-looking loss-differential prediction should be most useful: the ranking moves over time, but it does so slowly enough that local predictive structure can in principle be exploited.
+
+\paragraph{Scenario 2C: smooth drift in relative precision.}
+The fourth design shifts the source of instability from first moments to second moments. Bias is fixed at zero,
+\begin{equation}
+b_{j,t}=0,
+\end{equation}
+while log-precision follows the state equation
+\begin{equation}
+\lambda_{j,t}=\lambda_{j,t-1}+u_{j,t},
+\qquad
+u_{j,t}=\rho_{\lambda}u_{j,t-1}+\xi_{j,t},
+\qquad
+\xi_{j,t}\sim \mathcal{N}(0,\sigma_{\xi}^2),
+\end{equation}
+with $\rho_{\lambda}=0.95$, $\sigma_{\xi}^2=8\times10^{-4}$, and $\lambda_{j,t}\in[-2,2]$. The idiosyncratic scale is recovered as
+\begin{equation}
+\sigma_{j,t} = \exp(-\lambda_{j,t}/2).
+\end{equation}
+In this case the risk ranking satisfies
+\begin{equation}
+\mathcal{R}_{j,t}=\sigma_c^2+\sigma_{j,t}^2,
+\end{equation}
+so time variation comes entirely through forecast precision. The purpose of Scenario 2C is to test whether the combination rule can adapt when forecast quality changes without any drift in the forecast mean. This distinction is important because a method that only reacts to changing bias may look adaptive in level-shift environments while failing when instability is primarily heteroskedastic. Scenario 2C therefore isolates the value of the covariance and graph layers when relative performance moves through uncertainty rather than systematic bias.
+
+\paragraph{Scenario 4A: common low-frequency drift with small idiosyncratic deviations.}
+The final design makes instability real but mostly common across forecasters. Bias is decomposed as
+\begin{equation}
+b_{j,t}=m_t+\nu_{j,t},
+\end{equation}
+where the common component follows a random walk,
+\begin{equation}
+m_t = m_{t-1}+\varepsilon_t,
+\qquad
+\varepsilon_t \sim \mathcal{N}(0,0.05^2),
+\end{equation}
+and the idiosyncratic component follows a weak AR(1) process,
+\begin{equation}
+\nu_{j,t}=0.9\,\nu_{j,t-1}+\zeta_{j,t},
+\qquad
+\zeta_{j,t}\sim \mathcal{N}(0,0.005^2),
+\end{equation}
+with $\sigma_{j,t}=1$. Because the innovation scale of the common component is an order of magnitude larger than that of the idiosyncratic deviations, most nonstationarity is shared across all forecasters. The ranking can still move through the interaction between $m_t$ and $\nu_{j,t}$, but the cross-sectional signal is intentionally weak. This scenario is included to test a sharp economic limit of the framework: if instability is primarily common rather than relative, then there is little pairwise information to exploit, and aggressive reweighting should have limited scope to improve on simple diversification.
+
+Taken together, the design is nested. Scenario 1A is the null of no instability. Scenario 2A introduces discrete first-moment instability. Scenario 2B introduces smooth first-moment instability. Scenario 2C introduces smooth second-moment instability. Scenario 4A considers the case in which instability is present but largely common across forecasters. This structure is deliberate: it allows the performance of the competing combination rules to be mapped directly into the economic question of the paper, namely which forms of instability generate a meaningful return to forward-looking loss-differential combination.
+
+\subsection{Methodology for Adaptability Measures}
+
+Adaptability is evaluated through an event-study constructed around latent regime changes in the relative quality of the forecasters. The design follows directly from the literature reviewed above. Giacomini and Rossi (2009, 2010) show that instability should be studied locally, around episodes in which predictive performance changes, rather than through unconditional averages. Tian and Anderson (2014) emphasize that the relevant post-break question for combination methods is not only whether they eventually perform well, but also how rapidly they reallocate weight after the break. For these reasons, the methodology is built to satisfy three requirements: it must be event-local, comparable across breaks of different magnitudes, and informative both about the cumulative cost of adaptation and about the speed of recovery.
+
+The first step is to define the event. At each date $t$, the latent risk of forecaster $j$ under squared loss is
+\begin{equation}
+\mathcal{R}_{j,t}^{\mathrm{latent}} = b_{j,t}^2 + \sigma_{j,t}^2.
+\end{equation}
+The latent oracle forecaster is therefore
+\begin{equation}
+j_t^\star = \arg\min_{1 \leq j \leq M} \mathcal{R}_{j,t}^{\mathrm{latent}}.
+\end{equation}
+An adaptability event occurs whenever the identity of this oracle forecaster changes in the out-of-sample period,
+\begin{equation}
+\mathcal{E} = \left\{ t \geq T_0 : j_t^\star \neq j_{t-1}^\star \right\},
+\end{equation}
+with a minimal spacing rule imposed so that short-lived oscillations are not counted as separate breaks. This event definition follows the forecast-breakdown logic: a regime change is operationally relevant once the best forecaster is no longer the same as before. Using the \emph{latent} oracle, rather than the ex post best realized forecast, is deliberate. In simulation the latent object is observable, so adaptation can be judged relative to the structural change in forecast quality itself rather than to one-period realized-noise outcomes.
+
+The second step is to define the benchmark relative to which adaptation is judged. Rather than comparing each method only with the best individual forecaster, the analysis compares it with the time-varying oracle combination. This is important because the methods under study are forecast \emph{combinations}. Evaluating them only against the best single model would mechanically favor sparse selectors and would not answer whether the method learns the correct post-break allocation of weights. Let
+\begin{equation}
+G_t = \Sigma_t^{\mathrm{idio}} + b_t b_t'
+\end{equation}
+denote the latent second-moment matrix implied by the simulation design, where $b_t=(b_{1,t},\dots,b_{M,t})'$ and $\Sigma_t^{\mathrm{idio}}$ is the conditional covariance matrix of the idiosyncratic error component. The oracle combination is then
+\begin{equation}
+w_t^\star = \arg\min_{w \in \simplex} w'G_t w.
+\end{equation}
+This benchmark is closer to Tian and Anderson (2014) than a pure winner-take-all rule, because it evaluates whether a method learns the correct post-break combination structure rather than merely identifying the currently best single model.
+
+The third step is to compute the event-time loss gap for each method $m$. If $w_{m,t}$ denotes the weights chosen by method $m$ at time $t$, define its latent expected risk as
+\begin{equation}
+R_m(t) = w_{m,t}'G_t w_{m,t},
+\qquad
+R^\star(t) = w_t^{\star\prime} G_t w_t^\star.
+\end{equation}
+For event $t_e \in \mathcal{E}$ and event horizon $h=0,1,\dots,H-1$, the excess latent-risk gap is
+\begin{equation}
+g_{m,e}(h) = R_m(t_e+h) - R^\star(t_e+h).
+\end{equation}
+Because the scale of the initial disruption differs across events, the gap is normalized by its impact value,
+\begin{equation}
+q_{m,e}(h) = \frac{g_{m,e}(h)}{\max\{g_{m,e}(0),\varepsilon\}},
+\end{equation}
+where $\varepsilon>0$ is a small numerical constant. This normalization is essential. Without it, events with large impact values would mechanically dominate the ranking even if the subsequent recovery path were identical. By dividing by the event-specific impact, $q_{m,e}(h)$ becomes invariant to positive rescaling of the initial disruption and therefore isolates \emph{relative recovery speed}. The normalized gap is then smoothed with a short rolling-average window. This smoothing is not cosmetic; it is meant to avoid interpreting one-period reversals as economically meaningful recovery, again reflecting the local-performance logic in Giacomini and Rossi (2009, 2010). In discrete time, unsmoothed first-passage times are highly sensitive to transitory oscillations. Smoothing turns the statistic from a ``first lucky crossing'' measure into a summary of persistent re-learning.
+
+The final step is to summarize recovery with two complementary measures, which are the only adaptability measures retained in the main reported results.
+
+\paragraph{Integrated excess risk.}
+The first summary is the integrated excess risk,
+\begin{equation}
+\mathrm{IER}_m = \frac{1}{|\mathcal{E}|H}\sum_{e=1}^{|\mathcal{E}|}\sum_{h=0}^{H-1} g_{m,e}(h),
+\end{equation}
+which captures overall post-switch inefficiency. This is the economically broadest object in the set. Since $g_{m,e}(h)$ is measured in latent squared-loss units, $\mathrm{IER}_m$ is the average cumulative welfare cost of adapting too slowly after a switch. In that sense it is the natural analogue of cumulative regret in a dynamic decision problem. A method can have a short half-life but still a poor $\mathrm{IER}_m$ if its initial miss is very large; conversely, it can have a modest half-life but low integrated loss if the post-switch inefficiency is always small. This is why an area measure is needed in addition to speed measures.
+
+\paragraph{Half-life.}
+The second summary is the half-life for event $e$,
+\begin{equation}
+\mathrm{HL}_{m,e} = \inf\left\{ h \geq 0 : \widetilde{q}_{m,e}(h) \leq \frac{1}{2}\widetilde{q}_{m,e}(0) \right\},
+\end{equation}
+where $\widetilde{q}_{m,e}(h)$ denotes the smoothed relative gap. Half-life is chosen because it isolates the \emph{speed} of adjustment from the magnitude of the initial miss. To see this, suppose recovery follows the stylized decay law
+\begin{equation}
+\widetilde{q}_{m,e}(h) = \exp(-\kappa_{m,e} h).
+\end{equation}
+Then
+\begin{equation}
+\mathrm{HL}_{m,e} = \frac{\log 2}{\kappa_{m,e}},
+\end{equation}
+so the half-life is a monotone inverse transform of the latent recovery-speed parameter $\kappa_{m,e}$. This gives half-life a precise interpretation: it is the discrete-time summary of how persistent the post-switch gap is. We prefer it to raw slope coefficients because it remains interpretable even when recovery is nonlinear, and we prefer it to full time-to-convergence because convergence times are unstable in finite samples and overly sensitive to tail noise.
+
+Taken together, integrated excess risk and half-life are not redundant. Integrated excess risk measures the total post-switch cost of misalignment, while half-life measures recovery speed in a scale-free way. The first is an area measure; the second is a persistence measure. A method can therefore dominate in one dimension and not in the other. Additional diagnostics, such as target-based closure times or weight-space proximity to the oracle allocation, can be defined as supplementary checks, but they are not part of the baseline reported tables and are therefore omitted from the main empirical discussion.
+
+\setcounter{section}{5}
+\section{Simulation Results}
+
+\subsection{Monte Carlo Performance}
+
+Table \ref{tab:mc-winners} summarizes the best method in each scenario using the exported Monte Carlo tables. The main pattern is that there is no uniformly dominant rule, which is fully consistent with Zhao (2021). In the stable benchmark 1A, \texttt{equal} is the winner, while all three \texttt{full\_gcsr} variants are slightly worse with relative MSFE around $1.09$. This is the expected outcome: in a stable unbiased environment, reactivity creates estimation cost without enough compensating benefit. The same conclusion largely carries over to 4A, where \texttt{equal} again wins and the GCSR variants trail only marginally behind. The common random-walk bias moves all forecasters together, so there is limited value in aggressively exploiting cross-sectional rank differences.
+
+The more informative scenarios are 2A, 2B, and 2C. In 2A, which contains a single abrupt break in bias, \texttt{equal} remains marginally best and \texttt{var\_error} is a very close second. The \texttt{full\_gcsr} variants improve upon the graph-only methods, but they do not overtake the simpler benchmarks. This suggests that a one-time discontinuity is difficult to exploit unless the post-break regime is long enough to reward the extra estimation effort. In 2B, by contrast, the performance ranking changes completely. Here \texttt{var\_error} is the clear winner with relative MSFE $0.426$, while \texttt{full\_gcsr\_softmax}, \texttt{full\_gcsr\_eigenvector}, and \texttt{full\_gcsr\_pagerank} also beat equal weights decisively. Thus, when instability enters through a persistent drift in bias, dynamic conditioning is highly valuable, but the error-VAR benchmark captures that drift even more effectively than the graph layer. Scenario 2C is the strongest case for the proposed framework. All three \texttt{full\_gcsr} variants dominate equal weights, with relative MSFEs tightly clustered around $0.746$, and they also beat \texttt{var\_error}. This is exactly the environment where the graph-plus-covariance architecture should work best: the key object is the changing precision ranking, not abrupt level shifts in bias.
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabular}{lccc}
+\toprule
+Scenario & Best method & Relative MSFE vs equal & MCS size \\
+\midrule
+1A & \texttt{equal} & 1.000 & 8 \\
+2A & \texttt{equal} & 1.000 & 8 \\
+2B & \texttt{var\_error} & 0.426 & 1 \\
+2C & \texttt{full\_gcsr\_softmax} & 0.746 & 12 \\
+4A & \texttt{equal} & 1.000 & 8 \\
+\bottomrule
+\end{tabular}
+\caption{Scenario winners from the exported Monte Carlo summaries and the size of the corresponding model confidence set.}
+\label{tab:mc-winners}
+\end{table}
+
+The MCS results are useful because they show where these numerical gains are statistically decisive and where they are not. In 2B, the MCS collapses to a singleton containing only \texttt{var\_error}, which indicates a genuinely informative ranking. In 1A, 2A, and 4A, the MCS remains broad, again reinforcing the message that differences among the top conservative methods are modest. Scenario 2C is especially interesting: although the \texttt{full\_gcsr} variants have the best average Monte Carlo performance, the MCS contains all twelve methods. Hence, the 2C advantage is economically meaningful in the average ranking, but not sharp enough to exclude weaker methods at conventional confidence levels.
+
+\subsection{Adaptability After Oracle Switches}
+
+Using the methodology defined in Section 4.5, the adaptability analysis focuses on post-switch dynamics rather than unconditional mean loss. The key question is not simply whether a method is good on average, but whether it reweights quickly toward the correct post-switch combination once the latent ranking of forecasters changes.
+
+The adaptability results are informative in two different ways. In scenario 2A there is only one retained oracle switch, so the numbers should be read as a case study rather than as an average over many events. Within that caveat, the best overall method by integrated excess latent risk is \texttt{full\_gcsr\_softmax} at $0.0675$, with \texttt{full\_gcsr\_pagerank} and \texttt{bates\_granger\_mv} close behind. The shortest half-life among the leading methods is attained by \texttt{full\_gcsr\_eigenvector}, which reaches $4$ periods. This is a favorable result for the graph layer: after a discrete break, the GCSR rules reduce the post-switch gap more quickly than static averaging. At the same time, the 2A ranking also illustrates why half-life cannot be used in isolation. \texttt{graph\_only\_eigenvector} records a very short half-life of $2$, yet its integrated excess risk is $0.527$, which is an order of magnitude worse than the leading GCSR variants. The reason is that it starts from a very poor post-break allocation and therefore accumulates substantial loss even though the relative gap decays quickly afterward. This is exactly the type of case for which integrated excess risk is needed.
+
+Scenario 2B is more demanding and therefore more informative. Here the diagnostics record eight oracle-switch events. The overall winner is again \texttt{var\_error}, with mean integrated excess latent risk $0.373$ and mean half-life $12.75$. Among the GCSR methods, \texttt{full\_gcsr\_softmax} is clearly best: its integrated excess risk is $1.111$, compared with $1.222$ for eigenvector and $1.625$ for PageRank, while its mean half-life of $10.83$ is slightly shorter than the corresponding value for \texttt{full\_gcsr\_eigenvector}. Equal weights perform very poorly in this environment. Once again, the joint use of the two metrics is revealing. \texttt{bates\_granger\_mv} has a relatively short mean half-life of $6$, but its integrated excess risk is $14.816$, by far the worst among the methods reported. This means that the method removes half of its normalized gap quickly, yet does so only after a very costly initial miss. Conversely, \texttt{var\_error} does not have the shortest half-life in the sample, but it dominates in integrated excess risk because it keeps the overall post-switch loss burden low across events. The broad implication is that the GCSR family remains adaptive, but the error-VAR benchmark is the strongest method when instability takes the form of persistent bias drift.
+
+\begin{table}[htbp]
+\centering
+\footnotesize
+\begin{tabular}{llcc}
+\toprule
+Scenario & Method & Mean integrated excess risk & Mean half-life \\
+\midrule
+2A & \texttt{full\_gcsr\_softmax} & 0.0675 & 5.0 \\
+2A & \texttt{full\_gcsr\_eigenvector} & 0.0742 & 4.0 \\
+2B & \texttt{var\_error} & 0.3729 & 12.75 \\
+2B & \texttt{full\_gcsr\_softmax} & 1.1111 & 10.83 \\
+\bottomrule
+\end{tabular}
+\caption{Selected adaptability diagnostics from the exported event-study summaries.}
+\label{tab:adaptability}
+\end{table}
+
+Taken together, these adaptability results support a nuanced conclusion. The proposed graph-based combinations do adapt, and in the abrupt-break case they can be among the fastest methods to close the latent-risk gap. However, under the smooth and persistent bias drift of 2B, the \texttt{var\_error} benchmark remains the most effective adaptive device. More generally, the results validate the use of both adaptability measures jointly: half-life captures the persistence of the gap, while integrated excess risk captures the total cost of the post-switch path. Therefore, the main advantage of GCSR is not universal superiority in every dimension of adaptation, but rather a strong ability to remain competitive while combining forward-looking pairwise information with explicit covariance control.
+
+\subsection{Sensitivity to Centrality and Covariance Choice}
+
+The cross-scenario sensitivity sweep reveals an additional pattern that is not obvious from the scenario-by-scenario tables alone. Averaging over the five simulation environments, the best specification is \texttt{full\_gcsr\_eigenvector\_diagonal}, with mean relative MSFE $0.869$. It is followed by \texttt{full\_gcsr\_softmax\_diagonal} at $0.878$ and \texttt{full\_gcsr\_pagerank\_diagonal} at $0.882$. The broader message is that the covariance layer matters at least as much as the specific centrality measure. The top ten specifications in the simulation sweep are all \texttt{full\_gcsr} variants, while the best graph-only method, \texttt{graph\_only\_pagerank}, is merely close to parity on average and \texttt{graph\_only\_eigenvector} performs very poorly.
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabular}{lcc}
+\toprule
+Specification & Mean relative MSFE & MCS inclusion rate \\
+\midrule
+\texttt{full\_gcsr\_eigenvector\_diagonal} & 0.869 & 0.80 \\
+\texttt{full\_gcsr\_softmax\_diagonal} & 0.878 & 0.80 \\
+\texttt{full\_gcsr\_pagerank\_diagonal} & 0.882 & 0.80 \\
+\texttt{full\_gcsr\_pagerank\_shrinkage} & 0.903 & 1.00 \\
+\texttt{full\_gcsr\_eigenvector\_ewma} & 0.904 & 1.00 \\
+\bottomrule
+\end{tabular}
+\caption{Best specifications from the exported simulation sensitivity sweep.}
+\label{tab:sweep}
+\end{table}
+
+This ranking suggests that the most reliable use of graph information is not to let the graph dominate, but to combine it with strong regularization. In the simulation outputs, diagonal covariance estimation is especially effective because it prevents unstable off-diagonal covariance estimates from overwhelming the signal coming from the pairwise loss-differential graph. The centrality comparison then becomes a second-order issue. Eigenvector, PageRank, and softmax all perform well once they are embedded in the full GCSR objective, whereas their graph-only counterparts are much less stable. This is exactly the type of result one would hope for: the graph layer is useful, but only when it is disciplined by covariance control and shrinkage toward a conservative benchmark.
+
+\begin{thebibliography}{99}
+
+\bibitem{bates1969}
+Bates, J. M., and C. W. J. Granger (1969).
+``The Combination of Forecasts.''
+\textit{Operational Research Quarterly}, 20(4), 451--468.
+
+\bibitem{bonacich1972}
+Bonacich, P. (1972).
+``Factoring and Weighting Approaches to Status Scores and Clique Identification.''
+\textit{Journal of Mathematical Sociology}, 2(1), 113--120.
+\url{https://doi.org/10.1080/0022250X.1972.9989806}
+
+\bibitem{clemen1989}
+Clemen, R. T. (1989).
+``Combining Forecasts: A Review and Annotated Bibliography.''
+\textit{International Journal of Forecasting}, 5(4), 559--583.
+\url{https://doi.org/10.1016/0169-2070(89)90012-5}
+
+\bibitem{giacominiwhite2006}
+Giacomini, R., and H. White (2006).
+``Tests of Conditional Predictive Ability.''
+\textit{Econometrica}, 74(6), 1545--1578.
+
+\bibitem{giacominirossi2009}
+Giacomini, R., and B. Rossi (2009).
+``Detecting and Predicting Forecast Breakdowns.''
+\textit{Review of Economic Studies}, 76(2), 669--705.
+\url{https://doi.org/10.1111/j.1467-937X.2009.00538.x}
+
+\bibitem{giacominirossi2010}
+Giacomini, R., and B. Rossi (2010).
+``Forecast Comparisons in Unstable Environments.''
+\textit{Journal of Applied Econometrics}, 25(4), 595--620.
+\url{https://doi.org/10.1002/jae.1177}
+
+\bibitem{granzierasekhposyan2019}
+Granziera, E., and T. Sekhposyan (2019).
+``Predicting Relative Forecasting Performance: An Empirical Investigation.''
+\textit{International Journal of Forecasting}, 35(4), 1636--1657.
+\url{https://doi.org/10.1016/j.ijforecast.2019.01.010}
+
+\bibitem{hansenlundenason2011}
+Hansen, P. R., A. Lunde, and J. M. Nason (2011).
+``The Model Confidence Set.''
+\textit{Econometrica}, 79(2), 453--497.
+\url{https://doi.org/10.3982/ECTA5771}
+
+\bibitem{page1999}
+Page, L., S. Brin, R. Motwani, and T. Winograd (1999).
+``The PageRank Citation Ranking: Bringing Order to the Web.''
+Technical Report, Stanford InfoLab.
+\url{https://ilpubs.stanford.edu/422/}
+
+\bibitem{tiananderson2014}
+Tian, J., and H. M. Anderson (2014).
+``Forecast Combinations under Structural Break Uncertainty.''
+\textit{International Journal of Forecasting}, 30(1), 161--175.
+\url{https://doi.org/10.1016/j.ijforecast.2013.06.003}
+
+\bibitem{zhao2021}
+Zhao, Y. (2021).
+``The Robustness of Forecast Combination in Unstable Environments: A Monte Carlo Study of Advanced Algorithms.''
+\textit{Empirical Economics}, 61(1), 173--199.
+\url{https://doi.org/10.1007/s00181-020-01864-w}
+
+\bibitem{zhutimmermann2022}
+Zhu, Y., and A. Timmermann (2022).
+``Conditional Rotation between Forecasting Models.''
+\textit{Journal of Econometrics}, 231(2), 329--347.
+\url{https://doi.org/10.1016/j.jeconom.2021.10.006}
+
+\end{thebibliography}
+
+\end{document}

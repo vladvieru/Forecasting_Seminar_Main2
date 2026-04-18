@@ -1,0 +1,1 @@
+GLIDER covariance-estimation sensitivity. Bars report mean relative MSFE averaged across simulation exercises 1A, 2A, 2B, 2C, and 3A and across the eigenvector, PageRank, and softmax centralities; lower values indicate better performance relative to equal weights.

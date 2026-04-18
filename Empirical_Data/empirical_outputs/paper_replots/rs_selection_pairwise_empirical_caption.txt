@@ -1,0 +1,1 @@
+Direct empirical comparison of Hyperedge RS selection and standard RS selection for inflation and unemployment. The plotted series is the cumulative loss of Hyperedge RS selection minus the cumulative loss of RS selection, so negative values favor Hyperedge RS selection.

@@ -1,0 +1,1 @@
+Empirical weight stability for inflation and unemployment. The Herfindahl index is plotted over time for GLIDER softmax, GLIDE softmax, and RS selection; higher values indicate more concentrated forecast-combination weights.

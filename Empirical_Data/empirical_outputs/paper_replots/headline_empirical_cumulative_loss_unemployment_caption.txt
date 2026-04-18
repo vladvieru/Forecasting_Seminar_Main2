@@ -1,0 +1,1 @@
+Headline empirical comparison for unemployment. The figure plots cumulative loss differences relative to equal weights for GLIDE softmax, GLIDER softmax, RS selection, Hyperedge RS selection, and equal weights; lower cumulative loss differences indicate better relative performance.

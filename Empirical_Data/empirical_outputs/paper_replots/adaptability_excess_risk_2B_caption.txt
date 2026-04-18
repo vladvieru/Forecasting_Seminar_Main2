@@ -1,0 +1,1 @@
+Scenario 2B excess latent-risk profile. Lines show the non-cumulative mean excess latent risk after full-window latent oracle switches, averaged over 50 simulation replications using 202 full-window events out of 307 detected switch events; lower values indicate closer tracking of the latent oracle at that event horizon.

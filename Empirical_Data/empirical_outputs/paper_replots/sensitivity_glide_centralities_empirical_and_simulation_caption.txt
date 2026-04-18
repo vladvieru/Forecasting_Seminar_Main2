@@ -1,0 +1,1 @@
+GLIDE centrality sensitivity across empirical applications and simulation exercises. Side-by-side bars show relative MSFE for inflation, unemployment, and simulation exercises 1A, 2A, 2B, 2C, and 3A; the dotted reference line marks equal-weight performance.

@@ -1,0 +1,1 @@
+Scenario 2A excess latent-risk profile. Lines show the non-cumulative mean excess latent risk after the known Scenario 2A bias break at t=200, averaged over 50 simulation replications; lower values indicate closer tracking of the latent oracle at that event horizon.

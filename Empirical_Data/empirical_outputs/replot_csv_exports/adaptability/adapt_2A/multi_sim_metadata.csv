@@ -1,0 +1,2 @@
+scenario,replications,M,T,T0,bias_break_time,seed_start,seed_end,horizon,smooth_window,target_oracle_weight,fast_fixed_ld,event_definition
+2A,50,8,400,200,200,42,91,80,5,0.6,True,known Scenario 2A bias break

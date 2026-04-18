@@ -1,0 +1,1 @@
+Exercise-by-exercise GLIDER centrality sensitivity under shrinkage covariance. Side-by-side bars show relative MSFE for each centrality within each simulation exercise, with the dotted reference line marking equal-weight performance.
